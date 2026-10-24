@@ -5,7 +5,10 @@
 //   - URLとメソッド ........ src/connection/http.ts（FE_HTTP_DEFINITIONS）
 //   - 送る項目 .............. Sample_db/fe-be.ts（FERequestMap）
 //   - 返ってくる形・エラー .. Sample_db/api.ts（FEResponseMap / API_ERRORS）
-// 仕様が変わったら、このファイルの ROUTES と、仮バックエンドの返す形を合わせて直す。
+// FE-BE接続.pdf の全操作を window.API から呼べる（下の「画面から使う関数」）。
+//   - 送る前：REQUEST_RULES で形を確かめる。定義にない項目は送らない。前後の空白は除く
+//   - 受け取った後（本番モード）：RESPONSE_MODELS で data の全項目がそろっているか確かめる
+// 仕様が変わったら、このファイルの ROUTES・REQUEST_RULES・RESPONSE_MODELS と、仮バックエンドの返す形を合わせて直す。
 //
 // モードは2つ：
 //   mock（仮モード） … ブラウザの中の仮バックエンドが、仕様と同じ形で返す。今はこちら。
@@ -43,6 +46,8 @@
     NOT_FOUND: '見つかりませんでした。',
     VERSION_CONFLICT: '内容が更新されています。最新の状態を確認してください。',
     INVALID_STATE: '状態が変わっています。最新の状態を確認してください。',
+    INVITATION_INVALID: 'このQRコードは使えません。新しいQRコードを出してもらってください。',
+    PAIRING_EXPIRED: '時間切れです。接続をはじめからやり直してください。',
     RATE_LIMITED: '少し時間をおいてから、もう一度おしてください。',
     AI_UNAVAILABLE: 'AIが返事できませんでした。少しあとで試してください。',
     INTERNAL_ERROR: 'うまくいきませんでした。少しあとで試してください。',
@@ -58,46 +63,360 @@
 
   // ---------------------------------------------------------------
   // 送り先の一覧（src/connection/http.ts の FE_HTTP_DEFINITIONS と同じ）
+  //   [メソッド, URL, 成功時のステータス, 返ってくる data の型（下の RESPONSE_MODELS）]
   // ---------------------------------------------------------------
   const ROUTES = {
-    'profile.get': ['GET', '/api/profile', 200],
-    'profile.update': ['PATCH', '/api/profile', 200],
-    'child.create': ['POST', '/api/children', 201],
-    'child.rename': ['PATCH', '/api/children/{childId}', 200],
-    'child.settings.get': ['GET', '/api/children/{childId}/settings', 200],
-    'child.settings.update': ['PATCH', '/api/children/{childId}/settings', 200],
-    'children.list': ['GET', '/api/children', 200],
-    'conversations.list': ['GET', '/api/conversations', 200],
-    'negotiations.list': ['GET', '/api/negotiations', 200],
-    'conversation.create': ['POST', '/api/conversations', 201],
-    'conversation.get': ['GET', '/api/conversations/{conversationId}', 200],
-    'conversation.message': ['POST', '/api/conversations/{conversationId}/messages', 200],
-    'conversation.select_product': ['PATCH', '/api/conversations/{conversationId}/selected-product', 200],
-    'conversation.generate_proposal': ['POST', '/api/conversations/{conversationId}/proposal-drafts', 200],
-    'negotiation.get': ['GET', '/api/negotiations/{negotiationId}', 200],
-    'negotiation.message': ['POST', '/api/negotiations/{negotiationId}/messages', 200],
-    'negotiation.select_product': ['PATCH', '/api/negotiations/{negotiationId}/selected-product', 200],
-    'negotiation.generate_proposal': ['POST', '/api/negotiations/{negotiationId}/proposal-drafts', 200],
-    'proposal.get': ['GET', '/api/proposals/{proposalId}', 200],
-    'proposal.edit': ['PATCH', '/api/proposals/{proposalId}', 200],
-    'proposal.send': ['POST', '/api/proposals/{proposalId}/send', 200],
-    'proposal.respond': ['POST', '/api/proposals/{proposalId}/responses', 200],
-    'sharing.publish': ['POST', '/api/negotiations/{negotiationId}/shared-conditions', 201],
-    'sharing.revoke': ['DELETE', '/api/shared-conditions/{sharedConditionId}', 200],
-    'auth.session': ['GET', '/api/auth/session', 200],
-    'auth.google.reauthenticate': ['POST', '/api/auth/google/reauthenticate', 200],
-    'auth.logout': ['POST', '/api/auth/logout', 200],
-    'devices.list': ['GET', '/api/devices', 200],
-    'invitation.create': ['POST', '/api/children/{childId}/invitations', 201],
-    'pairing.bootstrap': ['POST', '/api/pairing/session', 201],
-    'pairing.request': ['POST', '/api/pairing/requests', 201],
-    'pairing.requests.list': ['GET', '/api/pairing/requests', 200],
-    'pairing.status': ['GET', '/api/pairing/requests/{pairingRequestId}', 200],
-    'pairing.respond': ['POST', '/api/pairing/requests/{pairingRequestId}/responses', 200],
-    'pairing.complete': ['POST', '/api/pairing/requests/{pairingRequestId}/complete', 200],
-    'device.revoke': ['DELETE', '/api/devices/{deviceSessionId}', 200],
+    'profile.get': ['GET', '/api/profile', 200, 'ProfileView'],
+    'profile.update': ['PATCH', '/api/profile', 200, 'ProfileView'],
+    'child.create': ['POST', '/api/children', 201, 'ChildView'],
+    'child.rename': ['PATCH', '/api/children/{childId}', 200, 'ChildView'],
+    'child.settings.get': ['GET', '/api/children/{childId}/settings', 200, 'ChildSettingsView'],
+    'child.settings.update': ['PATCH', '/api/children/{childId}/settings', 200, 'ChildSettingsView'],
+    'children.list': ['GET', '/api/children', 200, 'ChildList'],
+    'conversations.list': ['GET', '/api/conversations', 200, 'ConversationList'],
+    'negotiations.list': ['GET', '/api/negotiations', 200, 'NegotiationList'],
+    'conversation.create': ['POST', '/api/conversations', 201, 'ConversationView'],
+    'conversation.get': ['GET', '/api/conversations/{conversationId}', 200, 'ConversationView'],
+    'conversation.message': ['POST', '/api/conversations/{conversationId}/messages', 200, 'ConversationView'],
+    'conversation.select_product': ['PATCH', '/api/conversations/{conversationId}/selected-product', 200, 'ConversationView'],
+    'conversation.generate_proposal': ['POST', '/api/conversations/{conversationId}/proposal-drafts', 200, 'ConversationView'],
+    'negotiation.get': ['GET', '/api/negotiations/{negotiationId}', 200, 'NegotiationView'],
+    'negotiation.message': ['POST', '/api/negotiations/{negotiationId}/messages', 200, 'NegotiationView'],
+    'negotiation.select_product': ['PATCH', '/api/negotiations/{negotiationId}/selected-product', 200, 'NegotiationView'],
+    'negotiation.generate_proposal': ['POST', '/api/negotiations/{negotiationId}/proposal-drafts', 200, 'NegotiationView'],
+    'proposal.get': ['GET', '/api/proposals/{proposalId}', 200, 'ProposalView'],
+    'proposal.edit': ['PATCH', '/api/proposals/{proposalId}', 200, 'ProposalView'],
+    'proposal.send': ['POST', '/api/proposals/{proposalId}/send', 200, 'ProposalView'],
+    'proposal.respond': ['POST', '/api/proposals/{proposalId}/responses', 200, 'ProposalView'],
+    'sharing.publish': ['POST', '/api/negotiations/{negotiationId}/shared-conditions', 201, 'SharedConditionResult'],
+    'sharing.revoke': ['DELETE', '/api/shared-conditions/{sharedConditionId}', 200, 'SharedConditionRevocation'],
+    'auth.session': ['GET', '/api/auth/session', 200, 'SessionView'],
+    'auth.google.reauthenticate': ['POST', '/api/auth/google/reauthenticate', 200, 'AuthorizationRedirect'],
+    'auth.logout': ['POST', '/api/auth/logout', 200, 'LogoutResult'],
+    'devices.list': ['GET', '/api/devices', 200, 'DeviceList'],
+    'invitation.create': ['POST', '/api/children/{childId}/invitations', 201, 'InvitationResult'],
+    'pairing.bootstrap': ['POST', '/api/pairing/session', 201, 'PairingSession'],
+    'pairing.request': ['POST', '/api/pairing/requests', 201, 'PairingView'],
+    'pairing.requests.list': ['GET', '/api/pairing/requests', 200, 'PairingList'],
+    'pairing.status': ['GET', '/api/pairing/requests/{pairingRequestId}', 200, 'PairingView'],
+    'pairing.respond': ['POST', '/api/pairing/requests/{pairingRequestId}/responses', 200, 'PairingView'],
+    'pairing.complete': ['POST', '/api/pairing/requests/{pairingRequestId}/complete', 200, 'SignedInSession'],
+    'device.revoke': ['DELETE', '/api/devices/{deviceSessionId}', 200, 'DeviceRevocation'],
   };
+  // Googleログインは fetch ではなく、画面ごとこのURLへ移動して始める（成功で / 、失敗で /?authError=login_failed に戻る）
   const GOOGLE_LOGIN_PATH = '/api/auth/google/start';
+  // 親が子どもの端末に見せるQRのURL。後ろに招待トークンを付ける
+  const PAIRING_URL_PREFIX = '/pairing#invitationToken=';
+
+  // 仕様のエラーコードと、そのときのHTTPステータス（Sample_db/api.ts の API_ERRORS と同じ）
+  const ERROR_STATUS = {
+    INVALID_INPUT: 400, UNAUTHENTICATED: 401, FORBIDDEN: 403, CSRF_INVALID: 403, REAUTH_REQUIRED: 403,
+    NOT_FOUND: 404, VERSION_CONFLICT: 409, INVALID_STATE: 409, INVITATION_INVALID: 410, PAIRING_EXPIRED: 410,
+    RATE_LIMITED: 429, AI_UNAVAILABLE: 502, INTERNAL_ERROR: 500,
+  };
+
+  // ---------------------------------------------------------------
+  // 送る項目のきまり（src/connection/requests.ts の FE_REQUEST_DEFINITIONS と同じ）
+  // 送る前に形を確かめ、文字列の前後の空白を除く。定義にない項目・空の更新は送らない。
+  // URL に入るID（childId など）もここに含める。どこに置くかは ROUTES で決まる。
+  // ---------------------------------------------------------------
+  const rule = {
+    str: (max = 4000) => ({ kind: 'string', max }),
+    int: (min, max = Number.MAX_SAFE_INTEGER) => ({ kind: 'integer', min, max }),
+    nullable: (value) => ({ kind: 'nullable', value }),
+    oneOf: (...values) => ({ kind: 'enum', values }),
+    list: (item, max = 12) => ({ kind: 'array', item, max }),
+    // required: 必須の項目、min: 最低いくつ項目を送るか（「1項目以上更新」など）
+    obj: (fields, required = Object.keys(fields), min = required.length) => ({ kind: 'object', fields, required, min }),
+  };
+  const idRule = rule.str(128);
+  const stringsRule = (max = 300) => rule.list(rule.str(max));
+  const noBody = rule.obj({});
+  const proposalRef = { proposalId: idRule, version: rule.int(1) };
+
+  const REQUEST_RULES = {
+    'profile.get': noBody,
+    'profile.update': rule.obj({
+      displayName: rule.str(100),
+      profile: rule.obj({
+        age: rule.nullable(rule.int(0, 120)),
+        gender: rule.nullable(rule.oneOf('male', 'female', 'other')),
+        preferences: rule.obj({ interests: stringsRule(), wishes: stringsRule(), expectations: stringsRule() }, [], 1),
+      }, [], 1),
+    }, [], 1),
+    'child.create': rule.obj({ displayName: rule.str(100) }),
+    'child.rename': rule.obj({ childId: idRule, displayName: rule.str(100) }),
+    'child.settings.get': rule.obj({ childId: idRule }),
+    'child.settings.update': rule.obj({
+      childId: idRule,
+      rewardGuidelines: rule.obj({
+        smallJpy: rule.nullable(rule.int(0)), mediumJpy: rule.nullable(rule.int(0)), largeJpy: rule.nullable(rule.int(0)),
+      }, [], 1),
+      constraints: rule.obj({ mustHave: stringsRule(), mustAvoid: stringsRule() }, [], 1),
+    }, ['childId'], 2),
+    'children.list': noBody,
+    'conversations.list': noBody,
+    'negotiations.list': noBody,
+    'conversation.create': rule.obj({ childId: idRule, message: rule.nullable(rule.str()) }, []),
+    'conversation.get': rule.obj({ conversationId: idRule }),
+    'conversation.message': rule.obj({ conversationId: idRule, message: rule.str() }),
+    'conversation.select_product': rule.obj({ conversationId: idRule, selectedProductId: idRule }),
+    'conversation.generate_proposal': rule.obj({ conversationId: idRule }),
+    'negotiation.get': rule.obj({ negotiationId: idRule }),
+    'negotiation.message': rule.obj({ negotiationId: idRule, message: rule.str() }),
+    'negotiation.select_product': rule.obj({ negotiationId: idRule, selectedProductId: idRule }),
+    'negotiation.generate_proposal': rule.obj({ negotiationId: idRule }),
+    'proposal.get': rule.obj({ proposalId: idRule }),
+    'proposal.edit': rule.obj({ ...proposalRef, persuasionText: rule.str(), purchaseConditions: stringsRule(500) },
+      ['proposalId', 'version'], 3),
+    'proposal.send': rule.obj(proposalRef),
+    'proposal.respond': rule.obj({
+      ...proposalRef,
+      decision: rule.oneOf('approved', 'rejected', 'revision_requested'),
+      reason: rule.nullable(rule.str()),
+    }),
+    'sharing.publish': rule.obj({ conversationId: idRule, negotiationId: idRule, content: rule.str() }),
+    'sharing.revoke': rule.obj({ sharedConditionId: idRule }),
+    'auth.session': noBody,
+    'auth.google.reauthenticate': noBody,
+    'auth.logout': noBody,
+    'devices.list': noBody,
+    'invitation.create': rule.obj({ childId: idRule }),
+    'pairing.bootstrap': noBody,
+    'pairing.request': rule.obj({ invitationToken: rule.str(1024) }),
+    'pairing.requests.list': noBody,
+    'pairing.status': rule.obj({ pairingRequestId: idRule }),
+    'pairing.respond': rule.obj({ pairingRequestId: idRule, decision: rule.oneOf('approved', 'rejected') }),
+    'pairing.complete': rule.obj({ pairingRequestId: idRule }),
+    'device.revoke': rule.obj({ deviceSessionId: idRule }),
+  };
+
+  function invalidInput(field) {
+    throw new ApiError(400, { code: 'INVALID_INPUT', message: ERROR_HINT.INVALID_INPUT, field });
+  }
+
+  function checkRule(r, value, field) {
+    if (r.kind === 'nullable') return value === null ? null : checkRule(r.value, value, field);
+    if (r.kind === 'string') {
+      if (typeof value !== 'string' || !value.trim() || value.length > r.max) invalidInput(field);
+      return value.trim();
+    }
+    if (r.kind === 'integer') {
+      if (!Number.isSafeInteger(value) || value < r.min || value > r.max) invalidInput(field);
+      return value;
+    }
+    if (r.kind === 'enum') {
+      if (!r.values.includes(value)) invalidInput(field);
+      return value;
+    }
+    if (r.kind === 'array') {
+      if (!Array.isArray(value) || value.length > r.max) invalidInput(field);
+      return value.map((item, i) => checkRule(r.item, item, field + '[' + i + ']'));
+    }
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) invalidInput(field);
+    // undefined の項目は「送らない」扱いにする
+    const keys = Object.keys(value).filter((key) => value[key] !== undefined);
+    const path = (key) => (field ? field + '.' + key : key);
+    if (keys.length < r.min) invalidInput(field || 'body');
+    keys.forEach((key) => { if (!Object.hasOwn(r.fields, key)) invalidInput(path(key)); });
+    r.required.forEach((key) => { if (!keys.includes(key)) invalidInput(path(key)); });
+    return Object.fromEntries(keys.map((key) => [key, checkRule(r.fields[key], value[key], path(key))]));
+  }
+
+  // 送る直前に、仕様どおりの形にそろえる（形がちがえば INVALID_INPUT。BEには送らない）
+  function prepareInput(operation, input) {
+    const r = REQUEST_RULES[operation];
+    if (!r) invalidInput('operation');
+    const parsed = checkRule(r, input === undefined ? {} : input, '');
+    // 見送り・修正希望には理由が必要
+    if (operation === 'proposal.respond' && parsed.decision !== 'approved' && parsed.reason === null) invalidInput('reason');
+    return parsed;
+  }
+
+  // ---------------------------------------------------------------
+  // 返ってくる data の型（src/connection/responses.ts の RESPONSE_MODELS と同じ）
+  // 本番モードでは、全ての項目がそろっているかを確かめてから画面に渡す。
+  // ---------------------------------------------------------------
+  const s = {
+    ref: (name) => ({ $ref: name }),
+    str: (maxLength = 4000, minLength = 1) => ({ type: 'string', minLength, maxLength }),
+    int: (minimum = 0, maximum = Number.MAX_SAFE_INTEGER) => ({ type: 'integer', minimum, maximum }),
+    nil: { type: 'null' },
+    bool: { type: 'boolean' },
+    nullable: (schema) => ({ anyOf: [schema, { type: 'null' }] }),
+    array: (items) => ({ type: 'array', items }),
+    oneOf: (...values) => ({ enum: values }),
+    // optional に書いた項目は省略してよい。それ以外は必須。定義にない項目があれば不正
+    obj: (properties, optional = []) => ({
+      type: 'object', properties, required: Object.keys(properties).filter((key) => !optional.includes(key)),
+    }),
+  };
+  const sId = s.str(128);
+  const sName = s.str(100);
+  const sStrings = s.array(s.str(300));
+  const sTime = { ...s.str(40), format: 'date-time' };
+  const sUrl = { ...s.str(4096), format: 'https-url' };
+  const sRole = s.oneOf('parent', 'child');
+  const aiBase = { requestId: sId, reply: s.str(), search: s.nullable(s.ref('SearchMetadata')) };
+  const chatBase = {
+    products: s.array(s.ref('ProductCandidate')),
+    selectedProductId: s.nullable(sId),
+    currentProposal: s.nullable(s.ref('Proposal')),
+    latestAIOutput: s.nullable(s.ref('AIOutput')),
+  };
+
+  const RESPONSE_MODELS = {
+    // 設定とログイン状態
+    ProfileView: s.obj({ displayName: sName, profile: s.ref('AIUserProfile') }),
+    AIUserProfile: s.obj({
+      age: s.nullable(s.int(0, 120)),
+      gender: s.nullable(s.oneOf('male', 'female', 'other')),
+      preferences: s.obj({ interests: sStrings, wishes: sStrings, expectations: sStrings }),
+    }),
+    ChildView: s.obj({ childId: sId, displayName: sName }),
+    ChildList: s.obj({ children: s.array(s.ref('ChildView')) }),
+    ChildSettingsView: s.obj({ childId: sId, rewardGuidelines: s.ref('RewardGuidelines'), constraints: s.ref('PurchaseConstraints') }),
+    RewardGuidelines: s.obj({ smallJpy: s.nullable(s.int()), mediumJpy: s.nullable(s.int()), largeJpy: s.nullable(s.int()) }),
+    PurchaseConstraints: s.obj({ mustHave: sStrings, mustAvoid: sStrings }),
+    SessionView: { anyOf: [s.ref('SignedInSession'), s.ref('SignedOutSession')] },
+    SignedInSession: s.obj({
+      authenticated: s.oneOf(true),
+      user: { anyOf: [
+        s.obj({ role: s.oneOf('parent'), displayName: sName, childId: s.nil }),
+        s.obj({ role: s.oneOf('child'), displayName: sName, childId: sId }),
+      ] },
+      csrfToken: s.str(4096), idleExpiresAt: sTime, absoluteExpiresAt: sTime,
+    }),
+    SignedOutSession: s.obj({
+      authenticated: s.oneOf(false), user: s.nil, csrfToken: s.nil, idleExpiresAt: s.nil, absoluteExpiresAt: s.nil,
+    }),
+
+    // 会話と提案
+    ConversationSummary: s.obj({ conversationId: sId, childId: s.nullable(sId), createdAt: sTime, updatedAt: sTime }),
+    ConversationList: s.obj({ conversations: s.array(s.ref('ConversationSummary')) }),
+    NegotiationSummary: s.obj({
+      negotiationId: sId, childId: sId, status: s.oneOf('open', 'agreed', 'closed'), createdAt: sTime, updatedAt: sTime,
+    }),
+    NegotiationList: s.obj({ negotiations: s.array(s.ref('NegotiationSummary')) }),
+    ConversationView: s.obj({ conversationId: sId, childId: s.nullable(sId), messages: s.array(s.ref('ChatMessage')), ...chatBase }),
+    NegotiationView: s.obj({
+      negotiationId: sId, childId: sId, status: s.oneOf('open', 'agreed', 'closed'),
+      messages: s.array(s.ref('NegotiationMessage')), ...chatBase,
+      sharedConditions: s.array(s.ref('SharedCondition')),
+      negotiationResult: s.nullable(s.ref('NegotiationResult')),
+    }),
+    ChatMessage: s.obj({ id: sId, sender: s.oneOf('user', 'assistant'), content: s.str(), createdAt: sTime }),
+    NegotiationMessage: s.obj({ id: sId, sender: s.oneOf('parent', 'child', 'assistant'), content: s.str(), createdAt: sTime }),
+    ProposalView: s.obj({ proposal: s.ref('Proposal'), negotiationResult: s.nullable(s.ref('NegotiationResult')) }),
+    Proposal: s.obj({
+      id: sId, negotiationId: s.nullable(sId), productId: sId, version: s.int(1), persuasionText: s.str(),
+      purchaseConditions: s.array(s.str(500)),
+      status: s.oneOf('draft', 'pending', 'rejected', 'agreed', 'superseded'),
+    }),
+    NegotiationResult: { anyOf: [
+      s.obj({ proposalId: sId, version: s.int(1), decision: s.oneOf('approved'), reason: s.nullable(s.str()) }),
+      s.obj({ proposalId: sId, version: s.int(1), decision: s.oneOf('rejected', 'revision_requested'), reason: s.str() }),
+    ] },
+    SharedCondition: s.obj({ id: sId, sourceUserId: sId, targetUserId: sId, content: s.str(), approvedAt: sTime }),
+    SharedConditionResult: s.obj({ sharedCondition: s.ref('SharedCondition') }),
+    SharedConditionRevocation: s.obj({ sharedConditionId: sId, revoked: s.oneOf(true) }),
+
+    // 商品とAIの表示情報
+    ProductCandidate: s.obj({
+      id: sId, name: s.str(300), priceJpy: s.nullable(s.int()), productUrl: sUrl,
+      imageUrl: s.nullable(sUrl), priceCheckedAt: s.nullable(sTime),
+      size: s.oneOf('small', 'medium', 'large'), description: s.str(1000),
+      recommendationReason: s.str(1000), sourceUrls: s.array(sUrl),
+    }, ['imageUrl', 'priceCheckedAt']),
+    AIOutput: { anyOf: [
+      s.obj({ ...aiBase, action: s.oneOf('HEARING') }),
+      s.obj({ ...aiBase, action: s.oneOf('PRODUCT'), products: s.array(s.ref('ProductCandidate')) }),
+      s.obj({ ...aiBase, action: s.oneOf('PROPOSAL'), proposalDraft: s.ref('ProposalDraft') }),
+      s.obj({ ...aiBase, action: s.oneOf('NEGOTIATION'), proposalDraft: s.nullable(s.ref('ProposalDraft')) }),
+    ] },
+    ProposalDraft: s.obj({
+      productId: sId, target: sRole, persuasionText: s.str(), purchaseConditions: s.array(s.str(500)),
+      basedOn: s.nullable(s.obj({ proposalId: sId, version: s.int(1) })),
+    }),
+    SearchMetadata: s.obj({
+      queries: s.array(s.str()), sources: s.array(s.ref('SearchSource')), searchSuggestionsHtml: s.nullable(s.str(100000, 0)),
+    }),
+    SearchSource: s.obj({ id: sId, title: s.str(), url: sUrl }),
+
+    // QR接続と端末
+    AuthorizationRedirect: s.obj({ authorizationUrl: sUrl }),
+    LogoutResult: s.obj({ loggedOut: s.oneOf(true) }),
+    DeviceView: s.obj({
+      deviceSessionId: sId, role: sRole, childId: s.nullable(sId), deviceLabel: s.str(300),
+      createdAt: sTime, lastActiveAt: sTime, isCurrent: s.bool,
+    }),
+    DeviceList: s.obj({ devices: s.array(s.ref('DeviceView')) }),
+    DeviceRevocation: s.obj({ deviceSessionId: sId, currentDeviceRevoked: s.bool }),
+    InvitationResult: s.obj({ invitationToken: s.str(1024), childId: sId, expiresAt: sTime }),
+    PairingSession: s.obj({ csrfToken: s.str(4096), expiresAt: sTime }),
+    PairingView: s.obj({
+      pairingRequestId: sId, childId: sId, childDisplayName: sName, confirmationCode: s.str(32), deviceLabel: s.str(300),
+      status: s.oneOf('pending', 'approved', 'rejected', 'expired', 'cancelled'), requestedAt: sTime, expiresAt: sTime,
+    }),
+    PairingList: s.obj({ requests: s.array(s.ref('PairingView')) }),
+  };
+
+  // 日時はタイムゾーン付きの ISO 8601。URLは https だけ（ユーザー名・パスワード付きは不可）
+  function validFormat(format, value) {
+    if (format === 'date-time') {
+      return /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value)
+        && Number.isFinite(Date.parse(value))
+        && new Date(value.slice(0, 10) + 'T00:00:00Z').toISOString().slice(0, 10) === value.slice(0, 10);
+    }
+    if (format === 'https-url') {
+      try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && !url.username && !url.password;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function matches(schema, value) {
+    if (schema.$ref) return Object.hasOwn(RESPONSE_MODELS, schema.$ref) && matches(RESPONSE_MODELS[schema.$ref], value);
+    if (schema.anyOf) return schema.anyOf.some((candidate) => matches(candidate, value));
+    if (schema.enum) return schema.enum.includes(value);
+    switch (schema.type) {
+      case 'null': return value === null;
+      case 'boolean': return typeof value === 'boolean';
+      case 'integer': return Number.isSafeInteger(value) && value >= schema.minimum && value <= schema.maximum;
+      case 'string':
+        return typeof value === 'string' && value.length >= schema.minLength && value.length <= schema.maxLength
+          && validFormat(schema.format, value);
+      case 'array': return Array.isArray(value) && value.every((item) => matches(schema.items, item));
+      case 'object': {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+        return schema.required.every((key) => Object.hasOwn(value, key))
+          && Object.keys(value).every((key) => Object.hasOwn(schema.properties, key) && matches(schema.properties[key], value[key]));
+      }
+      default: return false;
+    }
+  }
+
+  // 成功時の本体 { data, requestId } が仕様どおりか
+  function validSuccess(model, payload) {
+    return matches(s.obj({ data: s.ref(model), requestId: sId }), payload);
+  }
+
+  // 失敗時の本体 { error: {...} } が仕様どおりか（コードとHTTPステータスの組み合わせも確かめる）
+  function validErrorBody(payload, status) {
+    const e = payload && typeof payload === 'object' ? payload.error : null;
+    return Boolean(e && typeof e === 'object')
+      && ERROR_STATUS[e.code] === status
+      && typeof e.message === 'string' && e.message.length > 0
+      && typeof e.requestId === 'string' && e.requestId.length > 0
+      && (e.field === null || typeof e.field === 'string')
+      && typeof e.stateMayHaveChanged === 'boolean'
+      && (e.retryAfterSeconds === null || (Number.isSafeInteger(e.retryAfterSeconds) && e.retryAfterSeconds >= 0))
+      && (e.code === 'RATE_LIMITED') === (e.retryAfterSeconds !== null);
+  }
 
   // 仕様にまだない操作（画面には必要）。本番モードでは NOT_AVAILABLE を返す。
   // バックエンド担当と相談して、仕様に足してもらう候補。
@@ -109,11 +428,24 @@
   // 本番モード：本物のバックエンドへ送る
   // ---------------------------------------------------------------
   function createHttpTransport() {
-    // CSRFトークンはメモリだけに持つ（localStorage に保存しない）
-    let csrfToken = null;
+    // CSRFトークンはメモリだけに持つ（localStorage に保存しない）。
+    // 通常のログイン用と、子ども端末の接続準備用（仮セッション）を取り違えないように分けて持つ。
+    let sessionCsrf = null;
+    let pairingCsrf = null;
+    const PAIRING_OPERATIONS = ['pairing.request', 'pairing.complete'];
 
-    // 送信前にCSRFトークンが必要な操作（読み取りと、ログイン前の操作以外）
+    // 送信前にCSRFトークンが必要な操作（読み取りと、接続準備の開始以外）
     const needsCsrf = (operation, method) => method !== 'GET' && operation !== 'pairing.bootstrap';
+
+    function csrfFor(operation) {
+      const pairing = PAIRING_OPERATIONS.includes(operation);
+      const token = pairing ? pairingCsrf : sessionCsrf;
+      if (!token || token.length > 4096 || /[\x00-\x20\x7f]/.test(token)) {
+        if (pairing) throw new ApiError(410, { code: 'PAIRING_EXPIRED', message: ERROR_HINT.PAIRING_EXPIRED });
+        throw new ApiError(401, { code: 'UNAUTHENTICATED', message: ERROR_HINT.UNAUTHENTICATED });
+      }
+      return token;
+    }
 
     function buildRequest(operation, input) {
       const route = ROUTES[operation];
@@ -132,10 +464,7 @@
       });
 
       const headers = { Accept: 'application/json' };
-      if (needsCsrf(operation, method)) {
-        if (!csrfToken) throw new ApiError(401, { code: 'UNAUTHENTICATED', message: 'ログインしてください。' });
-        headers['X-CSRF-Token'] = csrfToken;
-      }
+      if (needsCsrf(operation, method)) headers['X-CSRF-Token'] = csrfFor(operation);
       // Cookie は同じアドレスにだけ送る。通信先がリダイレクトしたら失敗にする
       const init = { method, headers, credentials: 'same-origin', cache: 'no-store', redirect: 'error' };
       if (Object.keys(body).length) {
@@ -150,9 +479,15 @@
 
     // ログイン状態の取得などで返ってきたCSRFトークンを覚えておく
     function rememberCsrf(operation, data) {
-      if (operation === 'auth.session') csrfToken = data.csrfToken || null;
-      if (operation === 'pairing.bootstrap' || operation === 'pairing.complete') csrfToken = data.csrfToken || csrfToken;
-      if (operation === 'auth.logout') csrfToken = null;
+      if (operation === 'auth.session') sessionCsrf = data.csrfToken; // 未ログインなら null
+      if (operation === 'pairing.bootstrap') pairingCsrf = data.csrfToken;
+      if (operation === 'pairing.complete') {
+        // 接続が確定したら、通常のログインに切り替わる
+        sessionCsrf = data.csrfToken;
+        pairingCsrf = null;
+      }
+      if (operation === 'auth.logout') sessionCsrf = null;
+      if (operation === 'device.revoke' && data.currentDeviceRevoked) sessionCsrf = null;
     }
 
     async function request(operation, input, signal) {
@@ -171,20 +506,20 @@
         throw new ApiError(0, { code: 'NETWORK_ERROR', message: ERROR_HINT.NETWORK_ERROR, stateMayHaveChanged: uncertain });
       }
 
+      const badResponse = () => new ApiError(response.status, {
+        code: 'INVALID_RESPONSE', message: ERROR_HINT.INVALID_RESPONSE, stateMayHaveChanged: uncertain,
+      });
       const type = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
       let payload = null;
       if (type === 'application/json') payload = await response.json().catch(() => null);
 
       if (!response.ok) {
-        const detail = payload && payload.error;
-        if (!detail || typeof detail.code !== 'string' || typeof detail.message !== 'string') {
-          throw new ApiError(response.status, { code: 'INVALID_RESPONSE', message: ERROR_HINT.INVALID_RESPONSE, stateMayHaveChanged: uncertain });
-        }
-        throw new ApiError(response.status, detail);
+        if (!validErrorBody(payload, response.status)) throw badResponse();
+        throw new ApiError(response.status, payload.error);
       }
-      if (!payload || typeof payload !== 'object' || !('data' in payload)) {
-        throw new ApiError(response.status, { code: 'INVALID_RESPONSE', message: ERROR_HINT.INVALID_RESPONSE, stateMayHaveChanged: uncertain });
-      }
+      // 成功のステータスと、data の全項目が仕様どおりかを確かめる
+      const [, , successStatus, model] = ROUTES[operation];
+      if (response.status !== successStatus || !validSuccess(model, payload)) throw badResponse();
       rememberCsrf(operation, payload.data);
       return payload.data;
     }
@@ -476,8 +811,23 @@
   // ---------------------------------------------------------------
   const useHttp = location.protocol.startsWith('http') && new URLSearchParams(location.search).get('api') === 'real';
   const transport = useHttp ? createHttpTransport() : createMockTransport(window.DATA);
-  const call = (operation, input, signal) => transport.request(operation, input, signal);
 
+  // どちらのモードでも、送る前に仕様どおりの形か確かめる（仕様にない操作は確認しない）
+  async function call(operation, input, signal) {
+    const body = NOT_IN_CONTRACT[operation] ? input : prepareInput(operation, input);
+    return transport.request(operation, body, signal);
+  }
+
+  // 画面URLのクエリ・フラグメントを1つ消す（ログイン失敗の印や招待トークンを残さない）
+  function cleanUrl({ query, fragment }) {
+    const url = new URL(location.href);
+    if (query) url.searchParams.delete(query);
+    if (fragment) url.hash = '';
+    history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+  }
+
+  // ---- 画面から使う関数（FE-BE接続.pdf の全操作） ----
+  // それぞれ BE が返した data をそのまま返す。失敗したら ApiError を投げる。
   window.API = {
     mode: transport.mode,
     ApiError,
@@ -487,27 +837,152 @@
     googleLoginUrl: transport.googleLoginUrl,
     signInAs: transport.signInAs || null,
 
+    // ログインと共通の送信情報
     auth: {
+      /** → SessionView。画面の初期化時に呼ぶ。CSRFトークンもここで受け取る */
       session: () => call('auth.session'),
+      /** Googleログインを始める（画面ごと移動。fetch では開かない） */
+      startGoogleLogin() {
+        const url = transport.googleLoginUrl();
+        if (url) location.assign(url);
+      },
+      /** → AuthorizationRedirect { authorizationUrl }。保護者のみ */
+      reauthenticate: () => call('auth.google.reauthenticate'),
+      /** 再認証の画面へ移動する。戻ってきたら auth.session で取り直す */
+      async startReauthentication() {
+        const { authorizationUrl } = await call('auth.google.reauthenticate');
+        location.assign(authorizationUrl);
+      },
+      /** → LogoutResult { loggedOut: true } */
       logout: () => call('auth.logout'),
+      /**
+       * Googleログインに失敗して戻ってきたか（/?authError=login_failed）。
+       * 見たら URL から消す。これだけでログイン成功や役割を判断しない。
+       */
+      takeLoginError() {
+        const failed = new URLSearchParams(location.search).get('authError') === 'login_failed';
+        if (failed) cleanUrl({ query: 'authError' });
+        return failed;
+      },
     },
+
+    // 本人のプロフィール
+    profile: {
+      /** → ProfileView */
+      get: () => call('profile.get'),
+      /** input: { displayName?, profile?: { age?, gender?, preferences?: { interests?, wishes?, expectations? } } } → ProfileView */
+      update: (input) => call('profile.update', input),
+    },
+
+    // 子どもごとの設定（保護者のみ）
     children: {
+      /** → ChildList { children } */
       list: () => call('children.list'),
+      /** → ChildView。受け取った childId を以降の操作で使う */
+      create: (displayName) => call('child.create', { displayName }),
+      /** → ChildView */
+      rename: (childId, displayName) => call('child.rename', { childId, displayName }),
+      /** → ChildSettingsView */
+      getSettings: (childId) => call('child.settings.get', { childId }),
+      /** input: { childId, rewardGuidelines?: { smallJpy?, mediumJpy?, largeJpy? }, constraints?: { mustHave?, mustAvoid? } } → ChildSettingsView */
+      updateSettings: (input) => call('child.settings.update', input),
     },
+
+    // 個別相談（本人だけの会話）
     conversations: {
+      /** → ConversationList { conversations } */
       list: () => call('conversations.list'),
+      /** input: { childId?（親が子どもを指定するときだけ）, message? } → ConversationView */
       create: (input) => call('conversation.create', input),
+      /** → ConversationView */
       get: (conversationId) => call('conversation.get', { conversationId }),
+      /** → ConversationView */
       message: (conversationId, message) => call('conversation.message', { conversationId, message }),
+      /** → ConversationView */
       selectProduct: (conversationId, selectedProductId) => call('conversation.select_product', { conversationId, selectedProductId }),
+      /** → ConversationView（currentProposal に下書きが入る） */
       generateProposal: (conversationId) => call('conversation.generate_proposal', { conversationId }),
     },
+
+    // 共有交渉（親子に見える会話）
+    negotiations: {
+      /** → NegotiationList { negotiations } */
+      list: () => call('negotiations.list'),
+      /** → NegotiationView */
+      get: (negotiationId) => call('negotiation.get', { negotiationId }),
+      /** → NegotiationView */
+      message: (negotiationId, message) => call('negotiation.message', { negotiationId, message }),
+      /** → NegotiationView */
+      selectProduct: (negotiationId, selectedProductId) => call('negotiation.select_product', { negotiationId, selectedProductId }),
+      /** → NegotiationView（currentProposal に修正版の下書きが入る） */
+      generateProposal: (negotiationId) => call('negotiation.generate_proposal', { negotiationId }),
+    },
+
+    // 提案
     proposals: {
+      /** → ProposalView { proposal, negotiationResult } */
       get: (proposalId) => call('proposal.get', { proposalId }),
+      /** input: { proposalId, version, persuasionText?, purchaseConditions? } → ProposalView */
       edit: (input) => call('proposal.edit', input),
+      /** → ProposalView */
       send: (proposalId, version) => call('proposal.send', { proposalId, version }),
+      /** input: { proposalId, version, decision, reason }（approved 以外は reason 必須） → ProposalView */
       respond: (input) => call('proposal.respond', input),
       received: () => call('proposals.received'), // 仕様にまだない
+    },
+
+    // 個別相談の要約を交渉へ公開する
+    sharing: {
+      /** input: { conversationId, negotiationId, content } → SharedConditionResult { sharedCondition } */
+      publish: (input) => call('sharing.publish', input),
+      /** → SharedConditionRevocation { sharedConditionId, revoked: true } */
+      revoke: (sharedConditionId) => call('sharing.revoke', { sharedConditionId }),
+    },
+
+    // 端末の管理（保護者のみ）
+    devices: {
+      /** → DeviceList { devices } */
+      list: () => call('devices.list'),
+      /** → DeviceRevocation。currentDeviceRevoked が true なら未ログインの画面へ切り替える。Google再認証が必要 */
+      revoke: (deviceSessionId) => call('device.revoke', { deviceSessionId }),
+    },
+
+    // 招待QR（保護者のみ。Google再認証が必要）
+    invitations: {
+      /** → InvitationResult { invitationToken, childId, expiresAt }。QRは5分で期限切れ */
+      create: (childId) => call('invitation.create', { childId }),
+      /** QRにする接続URL（サイトの /pairing#invitationToken=...） */
+      pairingUrl: (invitationToken) => new URL(PAIRING_URL_PREFIX + encodeURIComponent(invitationToken), location.origin).href,
+    },
+
+    // 子ども端末のQR接続
+    pairing: {
+      /**
+       * QRで開いたURLから招待トークンを取り出す。取り出したらURLから消す（保存しない）。
+       * トークンがなければ null。
+       */
+      takeInvitationToken() {
+        const match = /^#invitationToken=(.+)$/.exec(location.hash);
+        if (!match) return null;
+        cleanUrl({ fragment: true });
+        try {
+          return decodeURIComponent(match[1]);
+        } catch {
+          return null;
+        }
+      },
+      /** 子ども端末：仮セッションを始める → PairingSession */
+      bootstrap: () => call('pairing.bootstrap'),
+      /** 子ども端末：接続を申請する → PairingView（confirmationCode を画面に出す） */
+      request: (invitationToken) => call('pairing.request', { invitationToken }),
+      /** 子ども端末：承認されたかを見る → PairingView */
+      status: (pairingRequestId) => call('pairing.status', { pairingRequestId }),
+      /** 子ども端末：承認後に接続を確定する → SignedInSession */
+      complete: (pairingRequestId) => call('pairing.complete', { pairingRequestId }),
+      /** 保護者：届いた申請を見る → PairingList { requests } */
+      listRequests: () => call('pairing.requests.list'),
+      /** 保護者：承認・拒否する（decision: 'approved' | 'rejected'） → PairingView。Google再認証が必要 */
+      respond: (pairingRequestId, decision) => call('pairing.respond', { pairingRequestId, decision }),
     },
   };
 })();

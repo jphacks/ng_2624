@@ -56,6 +56,13 @@
       <section class="tasks">
         <h2>課題一覧</h2>
         <ul class="task-list" id="task-list"></ul>
+
+        <!-- 子どもが提案したお手伝い（親の返事を待っているもの・返事が来たもの） -->
+        <div class="task-proposals" id="task-proposals" hidden>
+          <h3>ていあんしたお手伝い</h3>
+          <ul class="my-proposal-list" id="task-proposal-list"></ul>
+        </div>
+        <button type="button" class="btn-task-propose" data-go="task-propose">＋ やりたいお手伝いを提案する</button>
       </section>
 
       <button type="button" class="btn-pill" data-go="talk">
@@ -106,6 +113,28 @@
       </form>
     </section>
 
+    <!-- C3 お手伝いの提案（子ども）。ごほうびと期限は親が決めるので、子どもは「やること」だけ書く -->
+    <section class="screen screen-form" data-screen="task-propose" hidden>
+      <div class="topbar">
+        <a class="back-link" href="#home">← ホームにもどる</a>
+      </div>
+      <h1 class="page-title">お手伝いを提案する</h1>
+      <p class="page-lead">やってみたいお手伝いを書いてね。ごほうびと期限は、おうちの人が決めるよ。</p>
+
+      <form class="proposal-form" id="task-propose-form" novalidate>
+        <div>
+          <label class="field-label" for="task-propose-title">やること</label>
+          <input type="text" id="task-propose-title" maxlength="100" autocomplete="off" placeholder="例：おふろそうじ">
+        </div>
+        <div>
+          <label class="field-label" for="task-propose-note">ひとこと（なくてもOK）</label>
+          <textarea id="task-propose-note" rows="3" maxlength="300" placeholder="例：毎日やってみたい！"></textarea>
+        </div>
+        <p class="form-error" id="task-propose-error" role="alert" hidden></p>
+        <button type="submit" class="btn-primary">おうちの人に送る</button>
+      </form>
+    </section>
+
     <!-- 送信完了（子ども） -->
     <section class="screen screen-done" data-screen="sent" hidden>
       <div class="done-card">
@@ -123,8 +152,71 @@
         <span class="role-chip">おうちの人</span>
       </div>
       <h1 class="page-title">届いた提案</h1>
+
+      <h2 class="section-title">ほしいもの</h2>
       <ul class="proposal-list" id="parent-proposals"></ul>
       <p class="empty-note" id="parent-empty">まだ提案は届いていません。<br>（試作版：「子どもとして始める」から提案を送ると、ここに届きます）</p>
+
+      <h2 class="section-title">お手伝い</h2>
+      <ul class="proposal-list" id="parent-task-proposals"></ul>
+      <p class="empty-note" id="parent-task-empty">まだお手伝いの提案は届いていません。</p>
+    </section>
+
+    <!-- P9 お手伝いの提案への回答（親）。承認するときに、ごほうびと期限を親が決める -->
+    <section class="screen screen-form screen-parent" data-screen="task-review" hidden>
+      <div class="topbar">
+        <a class="back-link" href="#parent">← 届いた提案</a>
+        <span class="role-chip">おうちの人</span>
+      </div>
+      <h1 class="page-title"><span id="task-review-child"></span>からのお手伝いの提案</h1>
+
+      <section class="review-block">
+        <h2 class="field-label">やること</h2>
+        <p class="review-text" id="task-review-title"></p>
+      </section>
+      <section class="review-block" id="task-review-note-wrap">
+        <h2 class="field-label">ひとこと</h2>
+        <p class="review-text" id="task-review-note"></p>
+      </section>
+
+      <!-- 回答前 -->
+      <form class="answer-form" id="task-answer-form" novalidate>
+        <fieldset>
+          <legend class="field-label">この提案にこたえる</legend>
+          <div class="decision-group">
+            <label class="decision decision-yes"><input type="radio" name="task-decision" value="approved">このまま承認</label>
+            <label class="decision decision-revise"><input type="radio" name="task-decision" value="modified">直して承認</label>
+            <label class="decision decision-no"><input type="radio" name="task-decision" value="rejected">見送る</label>
+          </div>
+        </fieldset>
+
+        <!-- 承認するとき（このまま／直して）に決めること -->
+        <div class="task-terms" id="task-terms" hidden>
+          <div id="task-edit-wrap" hidden>
+            <label class="field-label" for="task-edit-title">やること（直した内容）</label>
+            <input type="text" id="task-edit-title" maxlength="100" autocomplete="off">
+          </div>
+          <div>
+            <label class="field-label" for="task-reward">ごほうび（円）</label>
+            <input type="number" id="task-reward" min="0" step="1" inputmode="numeric" placeholder="例：10">
+          </div>
+          <div>
+            <label class="field-label" for="task-due">期限</label>
+            <input type="date" id="task-due">
+          </div>
+        </div>
+
+        <div id="task-reason-wrap" hidden>
+          <label class="field-label" for="task-reason" id="task-reason-label">理由（子どもに伝わります）</label>
+          <textarea id="task-reason" rows="3" maxlength="1000"></textarea>
+        </div>
+        <p class="form-error" id="task-answer-error" role="alert" hidden></p>
+        <button type="submit" class="btn-primary">この内容でこたえる</button>
+      </form>
+
+      <!-- 回答後 -->
+      <div class="answer-result" id="task-answer-result" tabindex="-1" role="status" hidden></div>
+      <button type="button" class="btn-pill" data-go="parent">届いた提案にもどる</button>
     </section>
 
     <!-- T3 提案への回答（親） -->
