@@ -4,3 +4,6 @@ node_modules/
 !.env.example
 
 /参考資料/
+# Supabase CLI local files
+supabase/.branches/
+supabase/.temp/
