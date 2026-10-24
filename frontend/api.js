@@ -254,26 +254,12 @@
       c.messages.push({ id: newId('msg'), sender, content, createdAt: now() });
     }
 
-    // AIの仮の返事（AIOutput と同じ形）
-    async function mockAI(c, message) {
+    // 仮の返事。AIは使わず、data.js の決まった文を順番に返すだけ（形は AIOutput と同じ）
+    async function fixedReply(c) {
       if (c.ownerRole === 'parent') {
         await wait(700);
         const reply = DATA.parentMockReplies[c.replyIndex++ % DATA.parentMockReplies.length];
         return { requestId: newId('ai'), action: 'HEARING', reply, search: null };
-      }
-      // 試作サーバー（dev-server.ts）から開いているときは、本物のAIに聞く。
-      // 試作サーバーがない（ファイルを直接開いた、Live Server など）ときは仮の返事にする。
-      if (location.protocol.startsWith('http')) {
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message }),
-        }).catch(() => null);
-        if (res && res.status !== 404 && res.status !== 405) {
-          const data = await res.json().catch(() => null);
-          if (res.ok && data && data.reply) return data;
-          fail(502, 'AI_UNAVAILABLE', (data && data.error) || ERROR_HINT.AI_UNAVAILABLE);
-        }
       }
       await wait(900);
       const step = DATA.mockReplies[c.replyIndex++ % DATA.mockReplies.length];
@@ -362,7 +348,7 @@
       async 'conversation.message'(input) {
         const c = ownConversation(input.conversationId);
         const message = text(input.message, 'message');
-        const out = await mockAI(c, message);
+        const out = await fixedReply(c);
         // 本人の発言とAIの返事を保存する（AIが失敗したら、どちらも保存しない）
         pushMessage(c, 'user', message);
         pushMessage(c, 'assistant', out.reply);
