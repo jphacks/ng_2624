@@ -66,7 +66,7 @@ export function createDB(config: Config, send: typeof fetch = fetch): DB {
       if (['PGRST205', 'PGRST202', '42P01', '42703'].includes(code)) throw new AppError(503, 'SETUP_REQUIRED', 'DBの更新がまだ適用されていません。');
       if (code === 'P0001' || code === '23505' || code === '23514' || response.status === 409) {
         const msg = String(result?.message || '');
-        const hint = /Insufficient/i.test(msg) ? '使えるポイントが足りません。' : /slot|size.*goal|active goal/i.test(msg) ? 'この大きさの目標がすでにあります。購入済みにしてから新しい目標を登録してください。' : /expired|unavailable/i.test(msg) ? '有効期限または現在の状態を確認してください。' : /version|stale/i.test(msg) ? '提案が更新されています。画面を再読み込みしてください。' : '現在の状態では操作できません。再読み込みして確認してください。';
+        const hint = /Confirmation code mismatch/i.test(msg) ? '確認番号が一致しません。子どもの画面の6桁の番号を入力してください。' : /Invitation already used/i.test(msg) ? 'この招待コードは使用済みです。保護者に新しい招待を発行してもらってください。' : /Invitation expired/i.test(msg) ? '招待コードが見つからないか、期限切れです。コードを確認するか、新しい招待を発行してください。' : /Pairing expired|Pairing unavailable/i.test(msg) ? '接続申請が期限切れか、承認待ちです。状態を確認し、期限切れなら新しい招待ではじめてください。' : /Insufficient/i.test(msg) ? '使えるポイントが足りません。' : /slot|size.*goal|active goal/i.test(msg) ? 'この大きさの目標がすでにあります。購入済みにしてから新しい目標を登録してください。' : /expired|unavailable/i.test(msg) ? '有効期限または現在の状態を確認してください。' : /version|stale/i.test(msg) ? '提案が更新されています。画面を再読み込みしてください。' : '現在の状態では操作できません。再読み込みして確認してください。';
         throw new AppError(409, 'CONFLICT', hint);
       }
       console.error('Supabase request failed', { path: path.split('?')[0], status: response.status, code });

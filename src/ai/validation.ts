@@ -169,6 +169,18 @@ export function parseAIInput(value: unknown): AIInput {
         currentProposal: proposal(input.currentProposal),
         negotiationResult: negotiationResult(input.negotiationResult),
     };
+    if (input.searchQuery !== undefined) {
+        if (result.mode !== 'consultation') invalid('searchQuery');
+        result.searchQuery = text(input.searchQuery, 'searchQuery', 300);
+    }
+    if (input.childContext !== undefined && result.mode === 'consultation') {
+        const child = record(input.childContext, 'childContext');
+        for (const [key, max] of [['age', 120], ['gradeLevel', 12]] as const) {
+            const n = child[key];
+            if (n !== null && (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > max)) invalid(`childContext.${key}`);
+        }
+        result.childContext = { age: child.age as number | null, gradeLevel: child.gradeLevel as number | null };
+    }
     if (result.message === null && !result.selectedProductId && !result.currentProposal && !result.negotiationResult) invalid('message');
     if (result.mode === 'consultation' && result.negotiationHistory.length) invalid('negotiationHistory');
     if (new Set(result.negotiationHistory.map(item => item.id)).size !== result.negotiationHistory.length) invalid('negotiationHistory.id');

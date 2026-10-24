@@ -99,6 +99,10 @@ export interface SearchMetadata {
 }
 
 export interface AIInput {
+  /** 本人が検索フォームで指定した公開検索語。個別相談のみ。 */
+  searchQuery?: string;
+  /** 保護者が登録した対象児の基本情報。非公開の好みや会話は含めない。 */
+  childContext?: { age: number | null; gradeLevel: number | null };
   requestId: string;
   now: string;
   role: UserRole;

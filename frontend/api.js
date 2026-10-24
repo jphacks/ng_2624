@@ -6,7 +6,7 @@
   if(method!=='GET'&&csrf) headers['X-CSRF-Token']=csrf;
   if(body!==undefined) headers['Content-Type']='application/json';
   let res;
-  try { res=await fetch('/api'+path,{method,headers,credentials:'same-origin',cache:'no-store',redirect:'error',...(body===undefined?{}:{body:JSON.stringify(body)})}); }
+  try { res=await fetch('/api'+path,{method,headers,credentials:'same-origin',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(150000),...(body===undefined?{}:{body:JSON.stringify(body)})}); }
   catch { throw new Error('通信結果を確認できません。最新の状態を読み込み、保存結果を確認してください。自動では再送しません。'); }
   let payload;
   try { payload=await res.json(); } catch { throw new Error('サーバーの応答を確認できません。'); }
