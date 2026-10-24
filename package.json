@@ -1,0 +1,30 @@
+{
+  "name": "jphacks-prep",
+  "version": "1.0.0",
+  "description": "コード保管用に作成した仮リポジトリです",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test src/ai/conversation.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RyosukeOkazaki-0408/JPHACKS-Prep.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/RyosukeOkazaki-0408/JPHACKS-Prep/issues"
+  },
+  "homepage": "https://github.com/RyosukeOkazaki-0408/JPHACKS-Prep#readme",
+  "dependencies": {
+    "@google/genai": "^2.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "supabase": "^2.121.0",
+    "typescript": "^7.0.2"
+  }
+}
