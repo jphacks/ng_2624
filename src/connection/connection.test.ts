@@ -26,11 +26,14 @@ const examples: { [K in FEOperation]: FERequestMap[K] } = {
   'proposal.respond': { proposalId: 'proposal-1', version: 1, decision: 'approved', reason: null },
   'sharing.publish': { conversationId: 'conversation-1', negotiationId: 'negotiation-1', content: '確認した要約' },
   'sharing.revoke': { sharedConditionId: 'shared-1' },
+  'auth.session': {},
   'auth.google.start': {},
   'auth.google.reauthenticate': {},
   'auth.logout': {},
   'devices.list': {},
   'invitation.create': { childId: 'child-1' },
+  'pairing.bootstrap': {},
+  'pairing.requests.list': {},
   'pairing.request': { invitationToken: 'example-invitation-token' },
   'pairing.status': { pairingRequestId: 'pairing-1' },
   'pairing.respond': { pairingRequestId: 'pairing-1', decision: 'approved' },
@@ -119,7 +122,7 @@ test('Googleのコールバック形式と重複や欠落を検証する', () =>
 });
 test('親だけの操作と再認証が必要な操作を区別する', () => {
   for (const operation of ['child.create', 'child.rename', 'child.settings.update', 'children.list',
-    'auth.google.reauthenticate', 'devices.list', 'invitation.create', 'pairing.respond', 'device.revoke'] as const) {
+    'auth.google.reauthenticate', 'devices.list', 'pairing.requests.list', 'invitation.create', 'pairing.respond', 'device.revoke'] as const) {
     assert.equal(roleMayCall(operation, 'parent'), true);
     assert.equal(roleMayCall(operation, 'child'), false);
   }
@@ -157,4 +160,13 @@ test('合意したCookieと端末や招待の制約を固定する', () => {
   assert.deepEqual(AUTH_POLICY.invitation, { lifetimeMs: 300_000, singleUse: true, invalidatePreviousOnReissue: true });
   assert.equal(AUTH_POLICY.replaceChildSession, 'after_parent_approval');
   assert.equal(AUTH_POLICY.automaticRetry, false);
+});
+
+test('本文なしの操作はundefinedを空オブジェクトとして扱う', () => {
+  for (const operation of ['auth.session', 'auth.google.start', 'pairing.bootstrap', 'pairing.requests.list', 'conversation.create'] as const) {
+    assert.deepEqual(parseFERequest(operation, undefined), {});
+    reject(operation, null);
+  }
+  reject('profile.update', undefined);
+  reject('conversation.message', undefined);
 });

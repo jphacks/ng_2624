@@ -76,12 +76,17 @@ export const FE_REQUEST_DEFINITIONS: Record<FEOperation, FERequestDefinition> = 
   'sharing.publish': definition('個別相談の要約を交渉へ公開', 'operation', object({ conversationId: id, negotiationId: id, content: str() }),
     { note: '本人が確認・編集して公開を許可した要約だけ。私的な履歴全体は送信しない。' }),
   'sharing.revoke': definition('要約の公開を取り消す', 'operation', object({ sharedConditionId: id })),
+  'auth.session': definition('現在のログイン状態とCSRFトークンを取得', 'auth', object({}),
+    { authentication: 'none', roles: [], csrf: false, note: '本文なし。現在のCookieに対応するログイン状態とcsrfTokenを取得。' }),
   'auth.google.start': definition('Googleログインを開始', 'auth', object({}),
     { authentication: 'none', roles: [], csrf: false, note: 'BE主導の認可コード方式。JSON本文なし。Googleとの往復はstateで照合。' }),
   'auth.google.reauthenticate': definition('保護者がGoogleで再認証', 'auth', object({}), parent),
   'auth.logout': definition('現在の端末からログアウト', 'auth', object({})),
   'devices.list': definition('保護者が接続端末を確認', 'auth', object({}), { ...parent, ...read }),
   'invitation.create': definition('対象の子供の招待QRを発行・再発行', 'auth', object({ childId: id }), important),
+  'pairing.bootstrap': definition('子供端末の仮セッションを開始', 'auth', object({}),
+    { authentication: 'none', roles: [], csrf: false, note: '本文なし。接続申請用のCookieとcsrfTokenを取得。通常のログイン状態は変更しない。' }),
+  'pairing.requests.list': definition('保護者が接続申請を確認', 'auth', object({}), { ...parent, ...read }),
   'pairing.request': definition('QRから子供端末の接続を申請', 'auth', object({ invitationToken: str(1024) }),
     { authentication: 'pairing', roles: [], note: 'BEが発行した仮セッションとCSRFトークンを使用。申請した端末へ紐付ける。' }),
   'pairing.status': definition('子供端末で接続承認の結果を取得', 'auth', object({ pairingRequestId: id }),
@@ -93,7 +98,12 @@ export const FE_REQUEST_DEFINITIONS: Record<FEOperation, FERequestDefinition> = 
 
 export class FEInputError extends Error {
   readonly code = 'INVALID_INPUT';
-  constructor(readonly field: string) { super(`${field}の形式が正しくありません。`); this.name = 'FEInputError'; }
+  readonly field: string;
+  constructor(field: string) {
+    super(`${field}の形式が正しくありません。`);
+    this.name = 'FEInputError';
+    this.field = field;
+  }
 }
 function invalid(field: string): never { throw new FEInputError(field); }
 function parseRule(rule: InputRule, value: unknown, field: string): unknown {
@@ -125,7 +135,9 @@ function parseRule(rule: InputRule, value: unknown, field: string): unknown {
 /** 認証済みの投稿先と操作はBEが決める。未知の属性・空の更新・理由不足を受け付けない。 */
 export function parseFERequest<K extends FEOperation>(operation: K, value: unknown): FERequestMap[K] {
   if (!Object.hasOwn(FE_REQUEST_DEFINITIONS, operation)) invalid('operation');
-  const result = parseRule(FE_REQUEST_DEFINITIONS[operation].rule, value, operation) as FERequestMap[K];
+  const rule = FE_REQUEST_DEFINITIONS[operation].rule;
+  const input = value === undefined && rule.kind === 'object' && rule.min === 0 ? {} : value;
+  const result = parseRule(rule, input, operation) as FERequestMap[K];
   if (operation === 'proposal.respond') {
     const response = result as FERequestMap['proposal.respond'];
     if (response.decision !== 'approved' && response.reason === null) invalid('proposal.respond.reason');

@@ -48,11 +48,14 @@ export interface FERequestMap {
   'proposal.respond': ProposalResponse;
   'sharing.publish': { conversationId: string; negotiationId: string; content: string };
   'sharing.revoke': { sharedConditionId: string };
+  'auth.session': Record<string, never>;
   'auth.google.start': Record<string, never>;
   'auth.google.reauthenticate': Record<string, never>;
   'auth.logout': Record<string, never>;
   'devices.list': Record<string, never>;
   'invitation.create': { childId: string };
+  'pairing.bootstrap': Record<string, never>;
+  'pairing.requests.list': Record<string, never>;
   'pairing.request': { invitationToken: string };
   'pairing.status': { pairingRequestId: string };
   'pairing.respond': { pairingRequestId: string; decision: 'approved' | 'rejected' };
