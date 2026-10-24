@@ -10,6 +10,8 @@
     role: null, // 'child' | 'parent'
     points: DATA.points,
     tasks: DATA.tasks.map((t) => ({ ...t })),
+    taskProposals: [], // 子どもが提案したお手伝い（課題一覧と同じく、APIがまだないので画面の中だけで持つ）
+    taskReviewId: null, // 親が見ているお手伝いの提案のID
     childConversationId: null,
     parentConversationId: null,
     editing: null, // 子どもが編集中の提案 { proposal, product }
@@ -171,6 +173,7 @@
     });
 
     renderTasks();
+    renderTaskProposals();
     loadMyProposal(isCurrent);
   }
 
@@ -235,6 +238,81 @@
       list.append(li);
     });
   }
+
+  // ---- お手伝いの提案（子ども → 親） ----
+  // 子どもは「やること」だけを提案し、ごほうびと期限は親が承認するときに決める。
+  // まだAPIがないので、課題一覧と同じく画面の中だけの仮データで動かす（docs/frontend-design.md の 3-2）。
+  // 1件の形：{ id, title, note, status: 'pending' | 'approved' | 'rejected', modified, reason, proposedAt, task }
+  //   modified … 親が内容を直して承認したら true
+  //   task ...... 承認したときに親が決めた内容 { title, reward, due }
+  const TASK_CHILD_STATUS = { pending: '返事待ち', approved: 'OK！', rejected: '今回は見送り' };
+  const TASK_PARENT_STATUS = { pending: '未回答', approved: '承認済み', rejected: '見送り済み' };
+  let taskProposalSeq = 0;
+
+  function findTaskProposal(id) {
+    return state.taskProposals.find((p) => p.id === id) || null;
+  }
+
+  function todayString() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  // '2026-10-31' → '10/31'（課題一覧の期限の表示に合わせる）
+  function formatDue(date) {
+    const [, month, day] = date.split('-');
+    return Number(month) + '/' + Number(day);
+  }
+
+  // 子どもホーム：提案したお手伝いと、親の返事
+  function renderTaskProposals() {
+    const items = state.taskProposals.slice().reverse(); // 新しい順
+    $('task-proposals').hidden = items.length === 0;
+    $('task-proposal-list').replaceChildren(...items.map((p) => {
+      const li = el('li', 'my-proposal is-' + p.status);
+      const head = el('div', 'my-proposal-head');
+      head.append(
+        el('span', 'my-proposal-name', p.title),
+        el('span', 'status-badge is-' + p.status, TASK_CHILD_STATUS[p.status]),
+      );
+      li.append(head);
+      if (p.status === 'approved') {
+        li.append(el('p', 'my-proposal-note', p.modified
+          ? 'おうちの人が「' + p.task.title + '」に直して、課題に入れたよ！'
+          : '課題に入ったよ！がんばろう！'));
+      }
+      if (p.reason) li.append(el('p', 'my-proposal-note', 'おうちの人より：' + p.reason));
+      return li;
+    }));
+  }
+
+  // C3 お手伝いの提案（子ども）
+  function renderTaskPropose() {
+    $('task-propose-form').reset();
+    hideError('task-propose-error');
+  }
+
+  $('task-propose-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const title = $('task-propose-title').value.trim();
+    const note = $('task-propose-note').value.trim();
+    if (!title) {
+      showError('task-propose-error', 'やることを書いてね。');
+      $('task-propose-title').focus();
+      return;
+    }
+    state.taskProposals.push({
+      id: 'task-proposal-' + (++taskProposalSeq),
+      title,
+      note: note || null,
+      status: 'pending',
+      modified: false,
+      reason: null,
+      proposedAt: new Date().toISOString(),
+      task: null,
+    });
+    location.hash = 'sent';
+  });
 
   // ---- 小目標の詳細シート ----
   let lastFocus = null;
@@ -569,6 +647,7 @@
   }
 
   async function renderParent(isCurrent) {
+    renderParentTaskProposals();
     const empty = $('parent-empty');
     try {
       const { proposals } = await API.proposals.received();
@@ -601,6 +680,129 @@
       empty.hidden = false;
     }
   }
+
+  // 親ホーム：届いたお手伝いの提案
+  function renderParentTaskProposals() {
+    const items = state.taskProposals.slice().reverse(); // 新しい順
+    $('parent-task-empty').hidden = items.length > 0;
+    $('parent-task-proposals').replaceChildren(...items.map((p) => {
+      const btn = el('button', 'proposal-item');
+      btn.type = 'button';
+      const main = el('span', 'proposal-item-main');
+      main.append(
+        el('span', 'proposal-item-name', p.title),
+        el('span', 'proposal-item-meta', DATA.user.name + 'から ・ ' + formatTime(p.proposedAt)),
+      );
+      btn.append(main, el('span', 'status-badge is-' + p.status, TASK_PARENT_STATUS[p.status]));
+      btn.addEventListener('click', () => {
+        state.taskReviewId = p.id;
+        location.hash = 'task-review';
+      });
+      const li = el('li');
+      li.append(btn);
+      return li;
+    }));
+  }
+
+  // ---- P9 お手伝いの提案への回答（親） ----
+  function renderTaskReview() {
+    const p = findTaskProposal(state.taskReviewId);
+    $('task-review-child').textContent = DATA.user.name;
+    $('task-review-title').textContent = p.title;
+    $('task-review-note-wrap').hidden = !p.note;
+    $('task-review-note').textContent = p.note || '';
+
+    const answered = p.status !== 'pending';
+    $('task-answer-form').hidden = answered;
+    $('task-answer-result').hidden = !answered;
+    if (answered) {
+      drawTaskAnswerResult(p);
+      return;
+    }
+    $('task-answer-form').reset();
+    $('task-edit-title').value = p.title;
+    $('task-due').min = todayString();
+    updateTaskAnswerFields(null);
+    hideError('task-answer-error');
+  }
+
+  // 選んだ答えに合わせて、入力欄を出し分ける
+  //   このまま承認 … ごほうび・期限
+  //   直して承認 … やること（直す）・ごほうび・期限・直した理由（任意）
+  //   見送る ...... 理由（必須）
+  function updateTaskAnswerFields(decision) {
+    $('task-terms').hidden = decision !== 'approved' && decision !== 'modified';
+    $('task-edit-wrap').hidden = decision !== 'modified';
+    $('task-reason-wrap').hidden = decision !== 'modified' && decision !== 'rejected';
+    const rejecting = decision === 'rejected';
+    $('task-reason-label').textContent = rejecting
+      ? '理由（子どもに伝わります）'
+      : '直した理由（なくてもOK・子どもに伝わります）';
+    $('task-reason').placeholder = rejecting
+      ? '例：おふろそうじはまだすべって危ないので、ほかのお手伝いにしようね'
+      : '例：毎日だと大変なので、週末だけにしたよ';
+  }
+
+  function drawTaskAnswerResult(p) {
+    const box = $('task-answer-result');
+    box.className = 'answer-result is-' + p.status;
+    if (p.status === 'approved') {
+      box.replaceChildren(
+        el('h2', null, p.modified ? '直して承認しました' : '承認しました'),
+        el('p', null, '「' + p.task.title + '」（ごほうび ' + yen(p.task.reward) + '・期限 ' + formatDue(p.task.due) + '）が'
+          + DATA.user.name + 'の課題に入りました。'),
+      );
+    } else {
+      box.replaceChildren(el('h2', null, '見送りました'), el('p', null, '理由は' + DATA.user.name + 'に伝わります。'));
+    }
+    if (p.reason) box.append(el('blockquote', null, p.reason));
+  }
+
+  $('task-answer-form').addEventListener('change', (e) => {
+    if (e.target.name !== 'task-decision') return;
+    updateTaskAnswerFields(e.target.value);
+    hideError('task-answer-error');
+  });
+
+  $('task-answer-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const p = findTaskProposal(state.taskReviewId);
+    if (!p || p.status !== 'pending') return renderTaskReview();
+    const checked = e.currentTarget.querySelector('input[name="task-decision"]:checked');
+    if (!checked) return showError('task-answer-error', 'このまま承認・直して承認・見送る のどれかを選んでください。');
+    const decision = checked.value;
+    const reason = $('task-reason').value.trim();
+
+    const invalid = (id, message) => {
+      showError('task-answer-error', message);
+      $(id).focus();
+    };
+
+    if (decision === 'rejected') {
+      if (!reason) return invalid('task-reason', '理由を書いてください。子どもが次の提案を考える手がかりになります。');
+      Object.assign(p, { status: 'rejected', reason });
+    } else {
+      const modified = decision === 'modified';
+      const title = modified ? $('task-edit-title').value.trim() : p.title;
+      const rewardText = $('task-reward').value.trim();
+      const reward = Number(rewardText);
+      const due = $('task-due').value;
+      if (!title) return invalid('task-edit-title', 'やることを書いてください。');
+      if (modified && title === p.title) {
+        return invalid('task-edit-title', 'やることを直してください。直さない場合は「このまま承認」を選んでください。');
+      }
+      if (!rewardText || !Number.isSafeInteger(reward) || reward < 0) {
+        return invalid('task-reward', 'ごほうびは0以上の整数（円）で入れてください。');
+      }
+      if (!due || due < todayString()) return invalid('task-due', '期限は今日以降の日付を選んでください。');
+
+      Object.assign(p, { status: 'approved', modified, reason: modified && reason ? reason : null, task: { title, reward, due } });
+      // 承認したお手伝いは、子どもの課題一覧に入る
+      state.tasks.push({ id: 'task-' + p.id, title, due: formatDue(due), reward, status: 'todo' });
+    }
+    renderTaskReview();
+    $('task-answer-result').focus();
+  });
 
   // ---- T3 提案への回答（親） ----
   function renderReview(isCurrent) {
@@ -745,8 +947,10 @@
     talk: { role: 'child', render: renderTalk },
     edit: { role: 'child', render: renderEdit },
     sent: { role: 'child', render: () => {} },
+    'task-propose': { role: 'child', render: renderTaskPropose },
     parent: { role: 'parent', render: renderParent },
     review: { role: 'parent', render: renderReview },
+    'task-review': { role: 'parent', render: renderTaskReview },
     ptalk: { role: 'parent', render: renderParentTalk },
   };
 
@@ -757,6 +961,7 @@
     if (screen.role && screen.role !== state.role) return state.role === 'parent' ? 'parent' : 'home';
     if (name === 'edit' && !state.editing) return 'talk';
     if ((name === 'review' || name === 'ptalk') && !findReceived(state.reviewId)) return 'parent';
+    if (name === 'task-review' && !findTaskProposal(state.taskReviewId)) return 'parent';
     return name;
   }
 
