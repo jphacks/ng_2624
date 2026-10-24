@@ -2,21 +2,18 @@
   'use strict';
 
   const DATA = window.DATA;
+  const API = window.API; // バックエンドとのやりとりは、すべて api.js を通す
 
-  // 試作サーバー（dev-server.ts）から開いたときは、子どものトークだけ本物のAIを使う。
-  // index.html を直接開いたときは、すべて仮の返事を使う。
-  const USE_API = location.protocol === 'http:' || location.protocol === 'https:';
-
-  // 画面の状態。バックエンドができたら、提案などはAPIから取得した値に置き換える。
+  // 画面の状態。会話や提案の中身はバックエンド（仮モードでは仮バックエンド）が持ち、
+  // ここには「どれを見ているか」と、取得した結果の控えだけを持つ。
   const state = {
+    role: null, // 'child' | 'parent'
     points: DATA.points,
     tasks: DATA.tasks.map((t) => ({ ...t })),
-    childMessages: USE_API
-      ? [{ from: 'ai', text: 'こんにちは！ほしいものや、すきなことを教えてね。' }]
-      : DATA.messages.slice(),
-    childReplyIndex: 0,
-    draft: null, // 子どもが編集中の提案 { product, persuasionText, purchaseConditions }
-    proposals: [], // 子どもが送った提案（新しい順）
+    childConversationId: null,
+    parentConversationId: null,
+    editing: null, // 子どもが編集中の提案 { proposal, product }
+    received: [], // 親に届いた提案（proposals.received の結果）
     reviewId: null, // 親が見ている提案のID
   };
 
@@ -28,8 +25,6 @@
     if (text !== undefined) node.textContent = text;
     return node;
   }
-
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   function yen(n) {
     return '¥' + n.toLocaleString('ja-JP');
@@ -51,6 +46,16 @@
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     return a;
+  }
+
+  function showError(id, text) {
+    const box = $(id);
+    box.textContent = text;
+    box.hidden = false;
+  }
+
+  function hideError(id) {
+    $(id).hidden = true;
   }
 
   // ---- 目標までの計算 ----
@@ -77,7 +82,15 @@
     return span;
   }
 
-  // ---- 提案の状態の表示 ----
+  // ---- 提案の状態 ----
+  // 提案の status と、親の回答（negotiationResult）から表示用の状態を決める
+  function statusKey(proposal, result) {
+    if (proposal.status === 'pending') return 'pending';
+    if (proposal.status === 'agreed') return 'approved';
+    if (result && result.decision) return result.decision;
+    return proposal.status === 'rejected' ? 'rejected' : 'pending';
+  }
+
   const CHILD_STATUS = {
     pending: '返事待ち',
     approved: 'OK！',
@@ -91,16 +104,40 @@
     rejected: '見送り済み',
   };
 
-  function proposalState(p) {
-    return p.response ? p.response.decision : 'pending';
+  // ---- 初期画面 ----
+  function renderStart() {
+    hideError('start-error');
+    $('start-hint').textContent = API.mode === 'mock'
+      ? '試作版（仮のバックエンドで動作中）：同じブラウザで切り替えると、子どもが送った提案が親の画面に届きます'
+      : 'バックエンドに接続しています';
   }
 
-  function findProposal(id) {
-    return state.proposals.find((p) => p.id === id) || null;
+  async function startAs(role) {
+    hideError('start-error');
+    if (API.mode === 'mock') {
+      API.signInAs(role);
+      state.role = role;
+      location.hash = role === 'parent' ? 'parent' : 'home';
+      return;
+    }
+    // 本番モード：ログイン状態をバックエンドに確認する
+    try {
+      const session = await API.auth.session();
+      if (session.authenticated && session.user.role === role) {
+        state.role = role;
+        location.hash = role === 'parent' ? 'parent' : 'home';
+      } else if (role === 'parent') {
+        location.assign(API.googleLoginUrl()); // Googleログインは画面ごと移動する
+      } else {
+        showError('start-error', '子どもの端末は、おうちの人のQRコードから接続してください。（接続画面は準備中です）');
+      }
+    } catch (err) {
+      showError('start-error', API.errorMessage(err));
+    }
   }
 
   // ---- 子どもホーム ----
-  function renderHome() {
+  function renderHome(isCurrent) {
     $('home-points').textContent = state.points.toLocaleString('ja-JP');
     $('home-pace').textContent = DATA.weeklyPace;
 
@@ -133,23 +170,46 @@
       subs.append(btn);
     });
 
-    renderMyProposals();
     renderTasks();
+    loadMyProposal(isCurrent);
   }
 
-  // 子どもが送った提案と、親の返事
-  function renderMyProposals() {
-    $('my-proposals').hidden = state.proposals.length === 0;
-    $('my-proposal-list').replaceChildren(...state.proposals.map((p) => {
-      const status = proposalState(p);
+  // 子どもが送った提案と、親の返事（会話の currentProposal から取得）
+  async function loadMyProposal(isCurrent) {
+    const box = $('my-proposals');
+    if (!state.childConversationId) {
+      box.hidden = true;
+      return;
+    }
+    try {
+      const view = await API.conversations.get(state.childConversationId);
+      const p = view.currentProposal;
+      if (!isCurrent()) return;
+      if (!p || p.status === 'draft') {
+        box.hidden = true;
+        return;
+      }
+      const { negotiationResult } = await API.proposals.get(p.id);
+      if (!isCurrent()) return;
+      const product = view.products.find((x) => x.id === p.productId);
+      const status = statusKey(p, negotiationResult);
+
       const li = el('li', 'my-proposal is-' + status);
       const head = el('div', 'my-proposal-head');
-      head.append(el('span', 'my-proposal-name', p.product.name), el('span', 'status-badge is-' + status, CHILD_STATUS[status]));
+      head.append(
+        el('span', 'my-proposal-name', product ? product.name : '提案した商品'),
+        el('span', 'status-badge is-' + status, CHILD_STATUS[status]),
+      );
       li.append(head);
       if (status === 'approved') li.append(el('p', 'my-proposal-note', 'もくひょうになったよ！がんばろう！'));
-      if (p.response && p.response.reason) li.append(el('p', 'my-proposal-note', 'おうちの人より：' + p.response.reason));
-      return li;
-    }));
+      if (negotiationResult && negotiationResult.reason) {
+        li.append(el('p', 'my-proposal-note', 'おうちの人より：' + negotiationResult.reason));
+      }
+      $('my-proposal-list').replaceChildren(li);
+      box.hidden = false;
+    } catch {
+      box.hidden = true; // ホームの表示は止めない
+    }
   }
 
   function renderTasks() {
@@ -240,7 +300,7 @@
     if (onChoose) {
       const choose = el('button', 'product-choose', 'これにする');
       choose.type = 'button';
-      choose.addEventListener('click', () => onChoose(product));
+      choose.addEventListener('click', () => onChoose(product, choose));
       actions.append(choose);
     }
     if (actions.childElementCount) info.append(actions);
@@ -269,10 +329,8 @@
   }
 
   // ---- チャット（子ども・親で共通） ----
-  // options.me: 自分の表示（名前・アイコン）
-  // options.onChoose: 商品カードに「これにする」を付けるとき
-  function messageEl(msg, options) {
-    const who = msg.from === 'ai' ? DATA.ai : options.me;
+  function messageEl(msg, me, onChoose) {
+    const who = msg.from === 'ai' ? DATA.ai : me;
     const row = el('div', 'msg ' + (msg.from === 'ai' ? 'msg-ai' : 'msg-me'));
     const avatar = el('span', 'avatar', who.avatar);
     avatar.setAttribute('aria-hidden', 'true');
@@ -280,285 +338,331 @@
     const bubbleClass = 'bubble' + (msg.typing ? ' typing' : '') + (msg.error ? ' is-error' : '');
     body.append(el('span', 'msg-name', who.name), el('p', bubbleClass, msg.text));
     if (msg.products && msg.products.length) {
-      body.append(productListEl(msg.products, msg.sources || [], options.onChoose));
+      body.append(productListEl(msg.products, msg.sources || [], onChoose));
     }
     row.append(avatar, body);
     return row;
   }
 
-  // getMessages: 表示するメッセージ配列を返す関数
-  // reply: 送った文を受け取り、AIの返事（Promise）を返す関数
-  function createChat({ listId, formId, getMessages, reply, options, typingText }) {
+  // 会話（ConversationView）を表示し、送信を受け付けるチャット欄
+  //   getId: 表示中の会話ID
+  //   greeting: 先頭に出すあいさつ（画面にだけ出す）
+  function createChat({ listId, formId, me, getId, greeting, onChoose, typingText }) {
     const list = $(listId);
     const form = $(formId);
     const input = form.querySelector('input');
     const submitBtn = form.querySelector('button');
+    let productAnchorId = null; // 商品カードを付けるAIの発言のID
 
     function scrollToBottom() {
       list.scrollTop = list.scrollHeight;
     }
 
-    function render() {
-      list.replaceChildren(...getMessages().map((m) => messageEl(m, options)));
+    function append(msg) {
+      const node = messageEl(msg, me, onChoose);
+      list.append(node);
+      scrollToBottom();
+      return node;
+    }
+
+    // バックエンドから受け取った会話を、そのまま描き直す
+    function render(view) {
+      const output = view.latestAIOutput;
+      const assistants = view.messages.filter((m) => m.sender === 'assistant');
+      if (output && output.action === 'PRODUCT' && assistants.length) {
+        productAnchorId = assistants[assistants.length - 1].id;
+      }
+      const sources = output && output.search ? output.search.sources : [];
+
+      const items = [];
+      if (greeting()) items.push({ from: 'ai', text: greeting() });
+      view.messages.forEach((m) => {
+        const msg = { from: m.sender === 'user' ? 'me' : 'ai', text: m.content };
+        if (m.id === productAnchorId && view.products.length) {
+          msg.products = view.products;
+          msg.sources = sources;
+        }
+        items.push(msg);
+      });
+      list.replaceChildren(...items.map((m) => messageEl(m, me, onChoose)));
       scrollToBottom();
     }
 
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const text = input.value.trim();
-      if (!text || submitBtn.disabled) return;
+      const conversationId = getId();
+      if (!text || submitBtn.disabled || !conversationId) return;
 
-      const messages = getMessages();
-      messages.push({ from: 'me', text });
-      list.append(messageEl({ from: 'me', text }, options));
       input.value = '';
-
-      const typing = messageEl({ from: 'ai', text: typingText(), typing: true }, options);
-      list.append(typing);
-      scrollToBottom();
+      append({ from: 'me', text });
+      const typing = append({ from: 'ai', text: typingText(), typing: true });
       submitBtn.disabled = true;
 
-      // 失敗しても自動で送り直さない（docs/frontend-design.md の方針）
-      reply(text)
-        .catch((err) => ({ from: 'ai', text: err.message, error: true }))
-        .then((msg) => {
-          if (!msg.error) messages.push(msg);
-          typing.replaceWith(messageEl(msg, options));
-          submitBtn.disabled = false;
-          scrollToBottom();
-        });
+      try {
+        render(await API.conversations.message(conversationId, text));
+      } catch (err) {
+        const errorMsg = { from: 'ai', text: API.errorMessage(err), error: true };
+        typing.replaceWith(messageEl(errorMsg, me));
+        let saved = false;
+        // 保存されたか分からないときは、取得し直して確かめる（自動で送り直さない）
+        if (err.stateMayHaveChanged || err.code === 'AI_UNAVAILABLE') {
+          try {
+            const view = await API.conversations.get(conversationId);
+            const mine = view.messages.filter((m) => m.sender === 'user');
+            saved = mine.length > 0 && mine[mine.length - 1].content === text;
+            render(view);
+            append(errorMsg); // 描き直しで消えないように、エラーをもう一度出す
+          } catch {
+            // 取り直せなくても、出ているエラー表示はそのまま
+          }
+        }
+        // 保存されなかった文は入力欄に戻す（送り直すかは本人が決める）
+        if (!saved && !input.value) input.value = text;
+      } finally {
+        submitBtn.disabled = false;
+        scrollToBottom();
+      }
     });
 
-    return { render };
+    return { render, append };
   }
 
   // ---- 子どものトーク ----
-  async function childReply(text) {
-    if (USE_API) {
-      const out = await askAI(text);
-      return {
-        from: 'ai',
-        text: out.reply,
-        products: out.action === 'PRODUCT' ? out.products : null,
-        sources: out.search ? out.search.sources : [],
-      };
-    }
-    await wait(900);
-    const step = DATA.mockReplies[state.childReplyIndex % DATA.mockReplies.length];
-    state.childReplyIndex += 1;
-    if (step.product) {
-      const out = DATA.mockProductReply;
-      return { from: 'ai', text: out.reply, products: out.products, sources: out.search.sources };
-    }
-    return { from: 'ai', text: step.text };
-  }
-
-  async function askAI(message) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 120000);
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-        signal: controller.signal,
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data) throw new Error((data && data.error) || 'AIの返事を受け取れませんでした');
-      return data;
-    } catch (err) {
-      if (err.name === 'AbortError') throw new Error('時間がかかりすぎたので止めました。もう一度送ってみてね。');
-      if (err instanceof TypeError) throw new Error('サーバーにつながりませんでした。dev-server が動いているか確認してね。');
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  // 画面を開き直したら、サーバー側の会話もリセットして表示とそろえる
-  if (USE_API) fetch('/api/reset', { method: 'POST' }).catch(() => {});
-
   const childChat = createChat({
     listId: 'child-messages',
     formId: 'child-composer',
-    getMessages: () => state.childMessages,
-    reply: childReply,
-    options: { me: DATA.user, onChoose: chooseProduct },
-    typingText: () => (USE_API ? '考え中…（少し時間がかかるよ）' : '…'),
+    me: DATA.user,
+    getId: () => state.childConversationId,
+    greeting: () => DATA.childGreeting,
+    onChoose: chooseProduct,
+    typingText: () => '考え中…',
   });
 
-  function renderTalk() {
+  async function renderTalk(isCurrent) {
     $('talk-points').textContent = state.points.toLocaleString('ja-JP');
-    childChat.render();
+    try {
+      const view = state.childConversationId
+        ? await API.conversations.get(state.childConversationId)
+        : await API.conversations.create({});
+      if (!isCurrent()) return;
+      state.childConversationId = view.conversationId;
+      childChat.render(view);
+    } catch (err) {
+      if (!isCurrent()) return;
+      $('child-messages').replaceChildren();
+      childChat.append({ from: 'ai', text: API.errorMessage(err), error: true });
+    }
+  }
+
+  // 「これにする」→ 商品を選ぶ → AIが提案の下書きを作る → 編集画面へ
+  async function chooseProduct(product, button) {
+    const buttons = document.querySelectorAll('#child-messages .product-choose');
+    buttons.forEach((b) => { b.disabled = true; });
+    button.textContent = '下書き中…';
+    try {
+      const id = state.childConversationId;
+      await API.conversations.selectProduct(id, product.id);
+      const view = await API.conversations.generateProposal(id);
+      if (!view.currentProposal) throw new Error('提案の下書きを受け取れませんでした。');
+      state.editing = { proposal: view.currentProposal, product };
+      location.hash = 'edit';
+    } catch (err) {
+      childChat.append({ from: 'ai', text: API.errorMessage(err), error: true });
+      buttons.forEach((b) => { b.disabled = false; });
+      button.textContent = 'これにする';
+    }
   }
 
   // ---- T2 提案の確認・送信（子ども） ----
   const MAX_CONDITIONS = 12;
-
-  // 「これにする」→ 提案の下書きを作る（本番ではAIが作る）
-  function chooseProduct(product) {
-    const due = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    const deadline = (due.getMonth() + 1) + '月' + due.getDate() + '日';
-    const fill = (s) => s.replace('{name}', product.name).replace('{deadline}', deadline);
-    state.draft = {
-      product,
-      persuasionText: fill(DATA.draftTemplate.persuasionText),
-      purchaseConditions: DATA.draftTemplate.purchaseConditions.map(fill),
-    };
-    location.hash = 'edit';
-  }
+  let editConditions = []; // 編集中のやくそく
 
   function renderEdit() {
-    const draft = state.draft;
-    $('edit-product').replaceChildren(productCardEl(draft.product));
-    $('edit-text').value = draft.persuasionText;
-    $('edit-error').hidden = true;
+    const { proposal, product } = state.editing;
+    $('edit-product').replaceChildren(productCardEl(product));
+    $('edit-text').value = proposal.persuasionText;
+    editConditions = proposal.purchaseConditions.slice();
+    hideError('edit-error');
     renderConditions();
   }
 
   function renderConditions() {
-    const conditions = state.draft.purchaseConditions;
-    $('edit-conditions').replaceChildren(...conditions.map((text, i) => {
+    $('edit-conditions').replaceChildren(...editConditions.map((text, i) => {
       const li = el('li', 'condition-item');
       const input = el('textarea');
       input.rows = 2;
       input.value = text;
       input.maxLength = 500;
       input.setAttribute('aria-label', 'やくそく' + (i + 1));
-      input.addEventListener('input', () => { conditions[i] = input.value; });
+      input.addEventListener('input', () => { editConditions[i] = input.value; });
       const remove = el('button', 'condition-remove', '×');
       remove.type = 'button';
       remove.setAttribute('aria-label', 'やくそく' + (i + 1) + 'を消す');
       remove.addEventListener('click', () => {
-        conditions.splice(i, 1);
+        editConditions.splice(i, 1);
         renderConditions();
       });
       li.append(input, remove);
       return li;
     }));
-    $('edit-add-condition').hidden = conditions.length >= MAX_CONDITIONS;
+    $('edit-add-condition').hidden = editConditions.length >= MAX_CONDITIONS;
   }
 
-  $('edit-text').addEventListener('input', (e) => {
-    if (state.draft) state.draft.persuasionText = e.target.value;
-  });
-
   $('edit-add-condition').addEventListener('click', () => {
-    state.draft.purchaseConditions.push('');
+    editConditions.push('');
     renderConditions();
     const inputs = $('edit-conditions').querySelectorAll('textarea');
     inputs[inputs.length - 1].focus();
   });
 
-  function showError(id, text) {
-    const box = $(id);
-    box.textContent = text;
-    box.hidden = false;
-  }
-
-  $('edit-form').addEventListener('submit', (e) => {
+  $('edit-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const draft = state.draft;
-    const text = draft.persuasionText.trim();
-    const conditions = draft.purchaseConditions.map((c) => c.trim()).filter(Boolean);
+    const submitBtn = e.currentTarget.querySelector('button[type="submit"]');
+    if (submitBtn.disabled) return;
+    const text = $('edit-text').value.trim();
+    const conditions = editConditions.map((c) => c.trim()).filter(Boolean);
     if (!text) return showError('edit-error', 'おねがいを書いてね。');
     if (!conditions.length) return showError('edit-error', 'やくそくを1つ以上書いてね。');
+    hideError('edit-error');
 
-    // 本番では proposal.edit → proposal.send でバックエンドに保存する
-    state.proposals.unshift({
-      id: 'proposal-' + Date.now(),
-      version: 1,
-      negotiationId: null,
-      productId: draft.product.id,
-      product: draft.product,
-      persuasionText: text,
-      purchaseConditions: conditions,
-      status: 'pending',
-      from: DATA.user.name,
-      sentAt: new Date(),
-      response: null,
-      parentMessages: [],
-      parentReplyIndex: 0,
-    });
-    state.childMessages.push({ from: 'ai', text: 'おうちの人に「' + draft.product.name + '」の提案を送ったよ。返事を待とうね。' });
-    state.draft = null;
-    location.hash = 'sent';
+    submitBtn.disabled = true;
+    try {
+      let proposal = state.editing.proposal;
+      const changed = text !== proposal.persuasionText
+        || JSON.stringify(conditions) !== JSON.stringify(proposal.purchaseConditions);
+      // 直したところがあれば、先に保存する（新しい版になる）
+      if (changed) {
+        proposal = (await API.proposals.edit({
+          proposalId: proposal.id, version: proposal.version, persuasionText: text, purchaseConditions: conditions,
+        })).proposal;
+        state.editing.proposal = proposal;
+      }
+      // 画面で見ている版を送る
+      await API.proposals.send(proposal.id, proposal.version);
+      state.editing = null;
+      location.hash = 'sent';
+    } catch (err) {
+      showError('edit-error', API.errorMessage(err));
+      // 内容が更新されていたら、最新を取り直して見せる
+      if (err.code === 'VERSION_CONFLICT' || err.code === 'INVALID_STATE') {
+        API.proposals.get(state.editing.proposal.id).then(({ proposal }) => {
+          state.editing.proposal = proposal;
+          renderEdit();
+          showError('edit-error', API.errorMessage(err));
+        }).catch(() => {});
+      }
+    } finally {
+      submitBtn.disabled = false;
+    }
   });
 
   // ---- P8 親ホーム ----
-  function formatTime(date) {
+  function formatTime(iso) {
+    const date = new Date(iso);
     return (date.getMonth() + 1) + '/' + date.getDate() + ' '
       + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
   }
 
-  function renderParent() {
-    $('parent-empty').hidden = state.proposals.length > 0;
-    $('parent-proposals').replaceChildren(...state.proposals.map((p) => {
-      const status = proposalState(p);
-      const btn = el('button', 'proposal-item');
-      btn.type = 'button';
-      const main = el('span', 'proposal-item-main');
-      main.append(
-        el('span', 'proposal-item-name', p.product.name),
-        el('span', 'proposal-item-meta', p.from + 'から ・ ' + formatTime(p.sentAt)),
-      );
-      btn.append(main, el('span', 'status-badge is-' + status, PARENT_STATUS[status]));
-      btn.addEventListener('click', () => {
-        state.reviewId = p.id;
-        location.hash = 'review';
-      });
-      const li = el('li');
-      li.append(btn);
-      return li;
-    }));
+  function findReceived(id) {
+    return state.received.find((item) => item.proposal.id === id) || null;
   }
 
-  // ---- T3 提案への回答（親） ----
-  function renderReview() {
-    const p = findProposal(state.reviewId);
-    $('review-child').textContent = p.from;
-    $('review-product').replaceChildren(productCardEl(p.product));
-    $('review-text').textContent = p.persuasionText;
-    $('review-conditions').replaceChildren(...p.purchaseConditions.map((c) => el('li', null, c)));
-
-    const answered = Boolean(p.response);
-    $('answer-form').hidden = answered;
-    $('answer-result').hidden = !answered;
-    if (answered) {
-      renderAnswerResult(p);
-    } else {
-      $('answer-form').reset();
-      $('answer-reason-wrap').hidden = true;
-      $('answer-error').hidden = true;
+  async function renderParent(isCurrent) {
+    const empty = $('parent-empty');
+    try {
+      const { proposals } = await API.proposals.received();
+      if (!isCurrent()) return;
+      state.received = proposals;
+      empty.textContent = 'まだ提案は届いていません。';
+      empty.hidden = proposals.length > 0;
+      $('parent-proposals').replaceChildren(...proposals.map((item) => {
+        const status = statusKey(item.proposal, item.negotiationResult);
+        const btn = el('button', 'proposal-item');
+        btn.type = 'button';
+        const main = el('span', 'proposal-item-main');
+        main.append(
+          el('span', 'proposal-item-name', item.product.name),
+          el('span', 'proposal-item-meta', item.childDisplayName + 'から ・ ' + formatTime(item.sentAt)),
+        );
+        btn.append(main, el('span', 'status-badge is-' + status, PARENT_STATUS[status]));
+        btn.addEventListener('click', () => {
+          state.reviewId = item.proposal.id;
+          location.hash = 'review';
+        });
+        const li = el('li');
+        li.append(btn);
+        return li;
+      }));
+    } catch (err) {
+      if (!isCurrent()) return;
+      $('parent-proposals').replaceChildren();
+      empty.textContent = API.errorMessage(err);
+      empty.hidden = false;
     }
   }
 
-  function renderAnswerResult(p) {
-    const { decision, reason } = p.response;
+  // ---- T3 提案への回答（親） ----
+  function renderReview(isCurrent) {
+    const item = findReceived(state.reviewId);
+    drawReview(item);
+    // 最新の状態を取り直す（ほかの端末で答えた場合など）
+    API.proposals.get(item.proposal.id).then((view) => {
+      if (!isCurrent()) return;
+      item.proposal = view.proposal;
+      item.negotiationResult = view.negotiationResult;
+      drawReview(item);
+    }).catch(() => {});
+  }
+
+  function drawReview(item) {
+    const p = item.proposal;
+    $('review-child').textContent = item.childDisplayName;
+    $('review-product').replaceChildren(productCardEl(item.product));
+    $('review-text').textContent = p.persuasionText;
+    $('review-conditions').replaceChildren(...p.purchaseConditions.map((c) => el('li', null, c)));
+
+    const answered = p.status !== 'pending';
+    $('answer-form').hidden = answered;
+    $('answer-result').hidden = !answered;
+    if (answered) {
+      drawAnswerResult(item);
+    } else if (!$('answer-form').contains(document.activeElement)) {
+      $('answer-form').reset();
+      $('answer-reason-wrap').hidden = true;
+      hideError('answer-error');
+    }
+  }
+
+  function drawAnswerResult(item) {
+    const result = item.negotiationResult;
+    const decision = statusKey(item.proposal, result);
     const box = $('answer-result');
     box.className = 'answer-result is-' + decision;
     const title = {
       approved: 'OKしました',
       revision_requested: '修正をお願いしました',
       rejected: '見送りました',
-    }[decision];
+    }[decision] || '回答済みです';
     const note = decision === 'approved'
-      ? '「' + p.product.name + '」が目標になります。（試作版：目標の登録はバックエンドができてから）'
-      : '理由は' + p.from + 'に伝わります。';
+      ? '「' + item.product.name + '」が目標になります。'
+      : '理由は' + item.childDisplayName + 'に伝わります。';
     box.replaceChildren(el('h2', null, title), el('p', null, note));
-    if (reason) box.append(el('blockquote', null, reason));
+    if (result && result.reason) box.append(el('blockquote', null, result.reason));
   }
 
   $('answer-form').addEventListener('change', (e) => {
     if (e.target.name !== 'decision') return;
     // 「見送る」「修正をお願い」は理由が必須
     $('answer-reason-wrap').hidden = e.target.value === 'approved';
-    $('answer-error').hidden = true;
+    hideError('answer-error');
   });
 
-  $('answer-form').addEventListener('submit', (e) => {
+  $('answer-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const p = findProposal(state.reviewId);
+    const submitBtn = e.currentTarget.querySelector('button[type="submit"]');
+    if (submitBtn.disabled) return;
+    const item = findReceived(state.reviewId);
     const checked = e.currentTarget.querySelector('input[name="decision"]:checked');
     if (!checked) return showError('answer-error', 'OK・修正をお願い・見送る のどれかを選んでください。');
     const decision = checked.value;
@@ -568,77 +672,106 @@
       $('answer-reason').focus();
       return;
     }
-    // 本番では proposal.respond でバックエンドに保存する
-    p.response = { decision, reason: decision === 'approved' ? null : reason, at: new Date() };
-    p.status = decision === 'approved' ? 'agreed' : 'rejected';
-    renderReview();
-    $('answer-result').focus();
+
+    submitBtn.disabled = true;
+    try {
+      // 画面で見ている版に対して答える
+      const view = await API.proposals.respond({
+        proposalId: item.proposal.id,
+        version: item.proposal.version,
+        decision,
+        reason: decision === 'approved' ? null : reason,
+      });
+      item.proposal = view.proposal;
+      item.negotiationResult = view.negotiationResult;
+      drawReview(item);
+      $('answer-result').focus();
+    } catch (err) {
+      showError('answer-error', API.errorMessage(err));
+      if (err.code === 'VERSION_CONFLICT' || err.code === 'INVALID_STATE' || err.stateMayHaveChanged) {
+        API.proposals.get(item.proposal.id).then((view) => {
+          item.proposal = view.proposal;
+          item.negotiationResult = view.negotiationResult;
+          drawReview(item);
+        }).catch(() => {});
+      }
+    } finally {
+      submitBtn.disabled = false;
+    }
   });
 
-  // ---- 親のAIトーク（提案についての個別相談） ----
-  // 試作サーバーは子ども用なので、親のトークは常に仮の返事を使う
-  async function parentReply() {
-    const p = findProposal(state.reviewId);
-    await wait(900);
-    const text = DATA.parentMockReplies[p.parentReplyIndex % DATA.parentMockReplies.length];
-    p.parentReplyIndex += 1;
-    return { from: 'ai', text };
-  }
-
+  // ---- 親のAIトーク（個別相談） ----
   const parentChat = createChat({
     listId: 'parent-messages',
     formId: 'parent-composer',
-    getMessages: () => findProposal(state.reviewId).parentMessages,
-    reply: parentReply,
-    options: { me: DATA.parent },
-    typingText: () => '…',
+    me: DATA.parent,
+    getId: () => state.parentConversationId,
+    greeting: () => {
+      const item = findReceived(state.reviewId);
+      return item
+        ? item.childDisplayName + 'から「' + item.product.name + '」の提案が届いています。条件や金額について、気になることを聞いてください。'
+        : '';
+    },
+    typingText: () => '考え中…',
   });
 
-  function renderParentTalk() {
-    const p = findProposal(state.reviewId);
-    const pinned = $('ptalk-pinned');
-    pinned.replaceChildren(
+  async function renderParentTalk(isCurrent) {
+    const item = findReceived(state.reviewId);
+    $('ptalk-pinned').replaceChildren(
       el('span', 'pinned-label', '相談中の提案'),
-      el('span', 'pinned-name', p.product.name
-        + (typeof p.product.priceJpy === 'number' ? '（' + yen(p.product.priceJpy) + '）' : '')),
-      el('span', 'pinned-meta', p.from + 'から ・ ' + PARENT_STATUS[proposalState(p)]),
+      el('span', 'pinned-name', item.product.name
+        + (typeof item.product.priceJpy === 'number' ? '（' + yen(item.product.priceJpy) + '）' : '')),
+      el('span', 'pinned-meta', item.childDisplayName + 'から ・ '
+        + PARENT_STATUS[statusKey(item.proposal, item.negotiationResult)]),
     );
-    if (!p.parentMessages.length) {
-      p.parentMessages.push({
-        from: 'ai',
-        text: p.from + 'から「' + p.product.name + '」の提案が届いています。条件や金額について、気になることを聞いてください。',
-      });
+    try {
+      const view = state.parentConversationId
+        ? await API.conversations.get(state.parentConversationId)
+        : await API.conversations.create({ childId: item.childId });
+      if (!isCurrent()) return;
+      state.parentConversationId = view.conversationId;
+      parentChat.render(view);
+    } catch (err) {
+      if (!isCurrent()) return;
+      $('parent-messages').replaceChildren();
+      parentChat.append({ from: 'ai', text: API.errorMessage(err), error: true });
     }
-    parentChat.render();
   }
 
   // ---- 画面の切り替え（URLの # で管理） ----
-  const RENDER = {
-    start: () => {},
-    home: renderHome,
-    talk: renderTalk,
-    edit: renderEdit,
-    sent: () => {},
-    parent: renderParent,
-    review: renderReview,
-    ptalk: renderParentTalk,
+  const SCREENS = {
+    start: { role: null, render: renderStart },
+    home: { role: 'child', render: renderHome },
+    talk: { role: 'child', render: renderTalk },
+    edit: { role: 'child', render: renderEdit },
+    sent: { role: 'child', render: () => {} },
+    parent: { role: 'parent', render: renderParent },
+    review: { role: 'parent', render: renderReview },
+    ptalk: { role: 'parent', render: renderParentTalk },
   };
 
-  // 必要なデータがない画面を開こうとしたときの戻り先
+  // 開けない画面を開こうとしたときの行き先
   function resolve(name) {
-    if (!RENDER[name]) return 'start';
-    if (name === 'edit' && !state.draft) return 'talk';
-    if ((name === 'review' || name === 'ptalk') && !findProposal(state.reviewId)) return 'parent';
+    const screen = SCREENS[name];
+    if (!screen || !state.role) return 'start'; // 役割を選ぶ前（再読み込み直後など）
+    if (screen.role && screen.role !== state.role) return state.role === 'parent' ? 'parent' : 'home';
+    if (name === 'edit' && !state.editing) return 'talk';
+    if ((name === 'review' || name === 'ptalk') && !findReceived(state.reviewId)) return 'parent';
     return name;
   }
+
+  // 非同期で読み込んでいる間に別の画面へ移ったら、古い結果を描かない
+  let screenSeq = 0;
 
   function show(requested) {
     const name = resolve(requested);
     if (name !== requested) history.replaceState(null, '', '#' + name);
+    const seq = ++screenSeq;
+    const isCurrent = () => seq === screenSeq;
     document.querySelectorAll('[data-screen]').forEach((s) => {
       s.hidden = s.dataset.screen !== name;
     });
-    RENDER[name]();
+    SCREENS[name].render(isCurrent);
     window.scrollTo(0, 0);
   }
 
@@ -646,7 +779,7 @@
     const go = e.target.closest('[data-go]');
     if (go) location.hash = go.dataset.go;
     const role = e.target.closest('[data-role]');
-    if (role) location.hash = role.dataset.role === 'parent' ? 'parent' : 'home';
+    if (role) startAs(role.dataset.role);
   });
   window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 
