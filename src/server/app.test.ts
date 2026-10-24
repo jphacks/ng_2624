@@ -35,6 +35,8 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  },enrich:async p=>({...p,imageUrl:null}),image:async()=>null,qr:async()=> 'data:image/png;base64,test'});
  async function call(path:string,method='GET',body?:unknown,role='child',csrf='csrf',origin=config.origin){const tok=role==='parent'?tokenParent:role==='stranger'?tokenStranger:tokenChild;const r=await app(new Request(config.origin+'/api'+path,{method,headers:{cookie:'wb_local_session='+tok,origin,'x-csrf-token':csrf,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}));return {status:r.status,...await r.json()};}
  await t.test('CSRF, role and family gates run before protected mutations',async()=>{
+  assert.equal((await call('/auth/logout','POST',{})).status,403);
+  assert.equal((await call('/auth/session')).data.authenticated,true);
   assert.equal((await call('/profile','PATCH',{displayName:'bad'},'parent','wrong')).status,403);
   assert.equal((await call('/profile','PATCH',{displayName:'bad'},'parent','csrf','https://evil.example')).status,403);
   assert.equal((await call('/children','GET')).status,403);
@@ -110,6 +112,11 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   const ownJar=jar;jar+='; wb_local_session='+tokenParent;
   const blocked=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(blocked.status,409);assert.equal(blocked.error.code,'ALREADY_AUTHENTICATED');
   jar=ownJar;const complete=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(complete.status,200);assert.equal(complete.data.user.role,'child');
+ });
+ await t.test('parent can log out from settings',async()=>{
+  const loggedOut=await call('/auth/logout','POST',{},'parent');
+  assert.equal(loggedOut.status,200);assert.equal(loggedOut.data.loggedOut,true);
+  assert.equal((await call('/auth/session','GET',undefined,'parent')).data.authenticated,false);
  });
  } finally {await pg.close();}
 });

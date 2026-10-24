@@ -106,3 +106,24 @@ test('shared chat uses negotiation endpoints and exposes only the active shared 
  await ui.submit('message','',{message:'テスト応答の再表示'});
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"/);
 });
+
+
+test('logout is available only in parent settings and child actions cannot call it',async()=>{
+ const sent:string[]=[];
+ const ui=await frontend(async(path,method)=>{
+  if(method==='POST')sent.push(path);
+  if(path==='/profile')return {displayName:'子',profile:{preferences:{}}};
+  if(path==='/devices')return {devices:[]};
+  if(path==='/pairing/requests')return {requests:[]};
+  return path==='/auth/session'?{...session,user:{...session.user,role:'child'}}:basic(path);
+ });
+ await ui.go('#settings');
+ assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/ログアウト/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/ログアウト/);
+ assert.match(ui.nodes['#content'].innerHTML,/data-form="child-profile"/);
+ await assert.rejects(ui.action('logout'),/保護者の設定/);
+ assert.deepEqual(sent,[]);
+ ui.state.session=session;await ui.go('#settings');
+ assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/ログアウト/);
+ assert.match(ui.nodes['#content'].innerHTML,/data-action="logout"/);
+});

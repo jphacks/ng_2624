@@ -243,7 +243,7 @@ export function createApp(config: Config, dep: Dependencies) {
       const requireParent = () => assert(user.role === 'parent', 403, 'FORBIDDEN', '保護者の操作が必要です。');
       const reauth = () => { requireParent(); assert(session.row.reauthenticated_at && Date.parse(session.row.reauthenticated_at) + 10 * 60000 > Date.now(), 403, 'REAUTH_REQUIRED', '安全のためGoogleで本人確認をしてください。'); };
       if (path === '/api/auth/google/reauthenticate' && method === 'POST') { requireParent(); return result({ authorizationUrl: await startOAuth(user.id) }); }
-      if (path === '/api/auth/logout' && method === 'POST') { await db.update('app_sessions', { token_hash: eq(session.row.token_hash) }, { revoked_at: new Date().toISOString() }); setCookie('session', '', 0); return result({ loggedOut: true }); }
+      if (path === '/api/auth/logout' && method === 'POST') { requireParent(); await db.update('app_sessions', { token_hash: eq(session.row.token_hash) }, { revoked_at: new Date().toISOString() }); setCookie('session', '', 0); return result({ loggedOut: true }); }
       if (path === '/api/profile' && method === 'GET') return result(await profile(user));
       if (path === '/api/profile' && method === 'PATCH') {
         const updates = user.role === 'parent' ? demographic(body) : {};
