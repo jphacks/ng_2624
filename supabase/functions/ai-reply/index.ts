@@ -12,11 +12,28 @@ const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const admin = createClient(supabaseUrl, supabaseServiceKey);
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 function json(body: unknown, status = 200) {
-  return Response.json(body, { status });
+  return Response.json(body, {
+    status,
+    headers: corsHeaders,
+  });
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders,
+    });
+  }
+
   if (req.method !== "POST") {
     return json({ error: "POSTのみ対応しています" }, 405);
   }
@@ -148,6 +165,7 @@ Deno.serve(async (req) => {
       mode: "consultation",
       message: message.trim(),
       history,
+      negotiationHistory: [],
       profile,
       sharedConditions: [],
       constraints: {
