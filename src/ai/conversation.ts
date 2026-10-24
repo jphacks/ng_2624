@@ -32,7 +32,7 @@ export async function createReply(
         // モデルが段階指定を無視しても、非公開コンテキストから検索・提案へ進ませない。
         if (input.mode === 'consultation') {
             return { ...base, action: 'HEARING', reply: decision.action === 'HEARING' ? decision.reply
-                : '商品検索や相手への提案に使う内容を確認し、共有を許可してから交渉へ進んでください。' };
+                : '交渉で公開する内容を確認・編集して許可してから、親子共通の交渉へ進んでください。' };
         }
         if (decision.action === 'HEARING') return { ...base, action: 'HEARING' };
         if (decision.action === 'SEARCH') {

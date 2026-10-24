@@ -4,7 +4,7 @@ import type { AIInput, AIOutput } from '../../Sample_db/types.ts';
 export const demoInput: AIInput = {
     requestId: 'demo-search', now: new Date().toISOString(), role: 'child',
     mode: 'negotiation', message: '目安金額に合わせて、実際に買えるロボット工作キットを探して。',
-    history: [], profile: null,
+    history: [], negotiationHistory: [], profile: null,
     // デモ用の許可済みデータ。実運用ではBEが同意記録と共有先を確認して構築する。
     sharedConditions: [{ id: 'demo-shared-1', sourceUserId: 'demo-child', targetUserId: 'demo-parent',
         content: '10歳向けのロボット工作キットを大中小それぞれの目安に合わせて探したい。', approvedAt: '2026-10-23T10:02:00+09:00' }],

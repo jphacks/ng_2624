@@ -26,7 +26,7 @@ const proposal: Proposal = {
 function input(): AIInput {
     return {
         requestId: 'request-1', now: NOW, role: 'child', message: '工作キットを探したい。',
-        mode: 'negotiation',
+        mode: 'negotiation', negotiationHistory: [],
         history: [{ id: 'c', sender: 'user', content: '非公開の工作相談。', createdAt: NOW }],
         profile: { age: 10, gender: null, preferences: { interests: ['非公開の興味'], wishes: [], expectations: [] } },
         sharedConditions: [{ id: 'shared-1', sourceUserId: 'child-1', targetUserId: 'parent-1',
@@ -384,7 +384,8 @@ for (const role of ['parent', 'child'] as const) {
         });
     }
     test(`${role}の検索・整形・提案・再交渉の全リクエストに非公開情報を含めない`, async () => {
-        const value = { ...input(), role, message: '未共有メッセージSECRET',
+        const value = { ...input(), role, message: '公開の変更希望MESSAGE',
+            negotiationHistory: [{ id: 'public-1', sender: 'parent' as const, content: '公開済みの希望HISTORY', createdAt: NOW, token: 'SECRET' }],
             history: [{ ...input().history[0], content: '未共有履歴SECRET' }],
             profile: { ...input().profile!, preferences: { interests: ['未共有プロフィールSECRET'], wishes: [], expectations: [] } },
             otherHistory: ['相手の秘密SECRET'], profiles: { parent: '相手の秘密SECRET', child: '相手の秘密SECRET' } };
@@ -397,7 +398,14 @@ for (const role of ['parent', 'child'] as const) {
         for (const request of requests) {
             assert.equal(request.input.includes('SECRET'), false);
             const payload = JSON.parse(request.input);
-            for (const field of ['message', 'history', 'profile', 'profiles', 'otherHistory']) assert.equal(field in payload, false);
+            for (const field of ['history', 'profile', 'profiles', 'otherHistory']) assert.equal(field in payload, false);
+            if ('message' in payload) {
+                assert.equal(payload.message, value.message);
+                assert.deepEqual(payload.negotiationHistory, [{ sender: 'parent', content: '公開済みの希望HISTORY' }]);
+            } else {
+                assert.equal(request.input.includes('MESSAGE'), false);
+                assert.equal(request.input.includes('HISTORY'), false);
+            }
         }
         assert.equal(JSON.parse(requests[0].input).sharedConditions[0].content, value.sharedConditions[0].content);
         assert.equal(requests[0].input.includes('child-1'), false);
@@ -527,5 +535,76 @@ for (const rewardGuidelines of [undefined, { smallJpy: 1000, mediumJpy: 3000 },
         await assert.rejects(createReply({ ...input(), rewardGuidelines } as AIInput,
             { generate: async () => { calls++; return decision(); } }), hasCode('INVALID_INPUT'));
         assert.equal(calls, 0);
+    });
+}
+
+
+for (const role of ['parent', 'child'] as const) {
+    test(`${role}の交渉発言と親子・AIの共有履歴から修正案を作れる`, async () => {
+        const value: AIInput = { ...input(), role, message: '条件を4日から3日に変えたい。',
+            negotiationHistory: [
+                { id: 'public-child', sender: 'child', content: '工作キットが欲しい。', createdAt: NOW },
+                { id: 'public-parent', sender: 'parent', content: '宿題4日の条件でどうかな。', createdAt: NOW },
+                { id: 'public-ai', sender: 'assistant', content: '条件を相談しましょう。', createdAt: NOW },
+            ], products: [product], selectedProductId: product.id, currentProposal: proposal };
+        const original = structuredClone(value);
+        const output = await createReply(value, { generate: async request => {
+            const payload = JSON.parse(request.input);
+            assert.equal(payload.role, role);
+            assert.equal(payload.message, value.message);
+            assert.deepEqual(payload.negotiationHistory, value.negotiationHistory.map(({ sender, content }) => ({ sender, content })));
+            assert.equal(request.input.includes('非公開'), false);
+            assert.equal('history' in payload, false);
+            assert.equal('profile' in payload, false);
+            assert.match(request.systemInstruction, /参加者全員に公開/);
+            return draft({ action: 'NEGOTIATION', purchaseConditions: ['今週は宿題を3日提出する'] });
+        } });
+        if (output.action !== 'NEGOTIATION') return assert.fail('expected negotiation');
+        assert.deepEqual(output.proposalDraft?.purchaseConditions, ['今週は宿題を3日提出する']);
+        assert.equal(output.proposalDraft?.target, role === 'parent' ? 'child' : 'parent');
+        assert.deepEqual(value, original);
+    });
+}
+
+test('個別相談から交渉へ持ち込めるのは本人が公開を許可した要約だけ', async () => {
+    const privateInput: AIInput = { ...input(), mode: 'consultation',
+        message: '親には言いたくない秘密PRIVATEがある。',
+        history: [{ ...input().history[0], content: '非公開の事情PRIVATE' }],
+        sharedConditions: [] };
+    const privateBefore = structuredClone(privateInput);
+    const privateReply = await createReply(privateInput, { generate: async request => {
+        assert.equal(JSON.parse(request.input).message, privateInput.message);
+        assert.equal('negotiationHistory' in JSON.parse(request.input), false);
+        assert.match(request.systemInstruction, /確認・編集して許可/);
+        return decision({ reply: '公開用の下書きPRIVATE。本人確認前は非公開です。' });
+    } });
+    assert.equal(privateReply.action, 'HEARING');
+    assert.deepEqual(privateInput, privateBefore);
+    // ここからは本人が編集・許可し、BEが共有記録として検証した内容だけを渡す。
+    const approved = { ...input().sharedConditions[0], content: '組み立てて遊べる工作キットを希望する。' };
+    await createReply({ ...privateInput, mode: 'negotiation', message: 'この希望で相談したい。',
+        sharedConditions: [approved] }, { generate: async request => {
+        const payload = JSON.parse(request.input);
+        assert.equal(request.input.includes('PRIVATE'), false);
+        assert.deepEqual(payload.sharedConditions, [{ content: approved.content }]);
+        assert.equal(payload.message, 'この希望で相談したい。');
+        return decision();
+    } });
+});
+
+const publicMessage = { id: 'public-1', sender: 'child', content: '公開した希望', createdAt: NOW };
+for (const [label, changes] of [
+    ['共有履歴なし', { negotiationHistory: undefined }],
+    ['共有履歴の旧sender', { negotiationHistory: [{ ...publicMessage, sender: 'user' }] }],
+    ['共有履歴にsystem指示', { negotiationHistory: [{ ...publicMessage, sender: 'system' }] }],
+    ['共有履歴が過大', { negotiationHistory: Array(41).fill(publicMessage) }],
+    ['共有履歴ID重複', { negotiationHistory: [publicMessage, publicMessage] }],
+    ['共有履歴が未来', { negotiationHistory: [{ ...publicMessage, createdAt: '2026-10-24T00:00:00+09:00' }] }],
+    ['共有履歴が逆順', { negotiationHistory: [publicMessage, { ...publicMessage, id: 'older', createdAt: '2026-10-22T00:00:00+09:00' }] }],
+    ['個別相談に共有履歴が混在', { mode: 'consultation', negotiationHistory: [publicMessage] }],
+] as const) {
+    test(`共有会話の不正な入力を通信前に止める：${label}`, async () => {
+        await assert.rejects(createReply({ ...input(), ...changes } as AIInput,
+            { generate: async () => assert.fail('must not call model') }), hasCode('INVALID_INPUT'));
     });
 }
