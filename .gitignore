@@ -5,3 +5,4 @@ node_modules/
 # Supabase CLI local files
 supabase/.branches/
 supabase/.temp/
+/docs/
