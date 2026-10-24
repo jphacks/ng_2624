@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WishBridge</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+
+    <!-- アカウント登録・ログイン -->
+    <section class="screen screen-login" data-screen="login">
+      <p class="tagline">がんばりと「ほしい」を、<br>親子でつなぐ</p>
+      <div class="login-actions">
+        <button type="button" class="btn-register" data-go="home">アカウント登録</button>
+        <p class="login-hint">すでにアカウントをお持ちですか？<a href="#home">ログイン</a></p>
+      </div>
+    </section>
+
+    <!-- ホーム画面 -->
+    <section class="screen screen-home" data-screen="home" hidden>
+      <div class="points-oval">
+        <span class="points-label">どりょくポイント</span>
+        <span class="points-value"><span id="home-points"></span><small>pt</small></span>
+      </div>
+      <p class="pace">週平均ペース：<span id="home-pace"></span>pt</p>
+
+      <div class="goals">
+        <article class="goal-main">
+          <h2 class="goal-title">大目標</h2>
+          <div class="goal-body">
+            <div class="goal-photo">
+              <div class="goal-photo-box" id="main-goal-visual"></div>
+              <span class="goal-name" id="main-goal-name"></span>
+            </div>
+            <div class="goal-side">
+              <div class="goal-info" id="main-goal-info"></div>
+              <a class="goal-link" id="main-goal-link" target="_blank" rel="noopener">詳細（リンク）</a>
+            </div>
+          </div>
+        </article>
+        <div class="goal-subs" id="sub-goals"></div>
+      </div>
+
+      <section class="tasks">
+        <h2>課題一覧</h2>
+        <ul class="task-list" id="task-list"></ul>
+      </section>
+
+      <button type="button" class="btn-pill" data-go="talk">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>
+        AIとおしゃべり
+      </button>
+    </section>
+
+    <!-- トーク（交渉）画面 -->
+    <section class="screen screen-talk" data-screen="talk" hidden>
+      <div class="talk-header">
+        <span class="points-chip">どりょくポイント：<span id="talk-points"></span> P</span>
+      </div>
+      <div class="messages" id="messages" aria-live="polite"></div>
+      <form class="composer" id="composer">
+        <input id="composer-input" type="text" placeholder="メッセージを入力" autocomplete="off" aria-label="メッセージ">
+        <button type="submit">送信</button>
+      </form>
+      <button type="button" class="btn-pill" data-go="home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 3l9 8v10h-6v-6H9v6H3z"/></svg>
+        ホーム画面
+      </button>
+    </section>
+  </div>
+
+  <!-- 小目標をタップしたときの詳細 -->
+  <div class="sheet" id="sheet" hidden>
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheet-name">
+      <div class="sheet-visual" id="sheet-visual"></div>
+      <h3 id="sheet-name"></h3>
+      <p id="sheet-text"></p>
+      <a class="sheet-link" id="sheet-link" target="_blank" rel="noopener">詳細（リンク）</a>
+      <button type="button" class="sheet-close" id="sheet-close">とじる</button>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
