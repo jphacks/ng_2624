@@ -18,6 +18,16 @@ function demographic(input: Row): Row {
   if ('gradeBaseSchoolYear' in input) { out.grade_base_school_year = integer(input.gradeBaseSchoolYear, 2200); assert(out.grade_base_school_year >= 2000); }
   return out;
 }
+function validateSettings(input: Row) {
+  if (input.rewardGuidelines) {
+    const values = ['smallJpy', 'mediumJpy', 'largeJpy'].map(k => input.rewardGuidelines[k]);
+    for (const value of values) if (value !== undefined && value !== null) integer(value);
+    const [small, medium, large] = values;
+    assert(!(small != null && medium != null && small > medium) && !(medium != null && large != null && medium > large), 400, 'INVALID_INPUT', '目標金額は小・中・大の順に同じか大きい金額を入力してください。');
+  }
+  if (input.constraints) for (const k of ['mustHave', 'mustAvoid']) if (k in input.constraints) strings(input.constraints[k]);
+  if ('chorePreferences' in input) strings(input.chorePreferences);
+}
 function childView(u: Row): Row {
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }); const year = +today.slice(0, 4) - (+today.slice(5, 7) < 4 ? 1 : 0);
   const current = u.grade_level && u.grade_base_school_year ? u.grade_level + year - u.grade_base_school_year : u.grade_level;
@@ -74,7 +84,7 @@ export function createApp(config: Config, dep: Dependencies) {
     const child = await one('users', { id: eq(childId) });
     return Promise.all([...drafts, ...list].map(async p => ({ ...await proposalView(user, p), childId, childDisplayName: child.display_name })));
   }
-  async function runAI(user: Row, conversationId: string, message: string | null) {
+  async function runAI(user: Row, conversationId: string, message: string | null, searchQuery?: string) {
     rate(`ai:${user.id}`, 20, 600000);
     assert(config.geminiKey, 503, 'SETUP_REQUIRED', 'AIの接続設定がまだ完了していません。');
     const lockId = randomUUID();
@@ -85,7 +95,8 @@ export function createApp(config: Config, dep: Dependencies) {
       const pv = p ? await proposalView(user, p) : null;
       const products = [...c.products];
       if (pv && !products.some(x => x.id === pv.product.id)) products.push(pv.product);
-      const input: AIInput = { requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, expectations: [...new Set([...pref.profile.preferences.expectations, ...configChild.chorePreferences])] } }, sharedConditions: [], constraints: configChild.constraints, rewardGuidelines: configChild.rewardGuidelines, products, selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };
+      const child = await one('users', { id: eq(c.child_id || user.id) });
+      const input: AIInput = { searchQuery, childContext: { age: age(child.birth_date), gradeLevel: childView(child).gradeLevel }, requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, expectations: [...new Set([...pref.profile.preferences.expectations, ...configChild.chorePreferences])] } }, sharedConditions: [], constraints: configChild.constraints, rewardGuidelines: configChild.rewardGuidelines, products: products.map(p => ({ ...p, imageUrl: null })), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };
       let output = await dep.ai(input);
       if (output.action === 'PRODUCT') { const products = (await Promise.all(output.products.map(dep.enrich))).filter((p): p is ProductCandidate => p !== null); output = products.length ? { ...output, products } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: 'Amazonの商品ページを確認できませんでした。希望する商品や条件を少し変えて、もう一度探してみましょう。' }; }
       const updated = await db.rpc('wb_finish_ai', { p_actor_id: user.id, p_conversation_id: c.id, p_lock_id: lockId, p_message: message, p_output: output });
@@ -153,7 +164,8 @@ export function createApp(config: Config, dep: Dependencies) {
       if (path === '/api/pairing/session' && method === 'POST') {
         rate(`bootstrap:${remoteAddress}`, 30, 600000);
         const existing = unseal(jar[cookieName(config, 'pair')] || '', config.sessionSecret);
-        const pair = existing || { token: randomToken(), csrf: randomToken(), exp: Date.now() + 600000 };
+        const invitationHash = body.invitationToken ? hash(text(body.invitationToken, 200).replace(/[\s-]/g, '').toUpperCase()) : undefined;
+        const pair = existing && (!invitationHash || existing.invitationHash === invitationHash) ? existing : { token: randomToken(), csrf: randomToken(), exp: Date.now() + 600000, ...(invitationHash ? { invitationHash } : {}) };
         setCookie('pair', seal(pair, config.sessionSecret), Math.max(0, Math.ceil((pair.exp - Date.now()) / 1000)));
         return result({ csrfToken: pair.csrf, expiresAt: new Date(pair.exp).toISOString() }, 201);
       }
@@ -163,7 +175,8 @@ export function createApp(config: Config, dep: Dependencies) {
         if (method === 'POST') protectMutation(request, config, pair.csrf);
         rate(`pair:${remoteAddress}`, 30, 600000);
         let r: Row;
-        if (!pairStatus) { const token = text(body.invitationToken, 200).replace(/[\s-]/g, '').toUpperCase(); assert(/^[A-Z2-9]{12}$/.test(token)); r = await db.rpc('wb_request_pairing', { p_invitation_hash: hash(token), p_token_hash: hash(pair.token) }); }
+        if (!pairStatus || pairStatus[2]) assert(!(await loadSession(false)), 409, 'ALREADY_AUTHENTICATED', 'ログイン中です。子どもの別ブラウザーまたは別端末で招待を開いてください。');
+        if (!pairStatus) { const token = text(body.invitationToken, 200).replace(/[\s-]/g, '').toUpperCase(); assert(/^[A-Z2-9]{12}$/.test(token), 400, 'INVALID_INPUT', '招待コードは12文字の英数字です。6桁の確認番号とは異なります。'); r = await db.rpc('wb_request_pairing', { p_invitation_hash: hash(token), p_token_hash: hash(pair.token) }); }
         else r = await one('app_pairing_requests', { id: eq(uuid(pairStatus[1])), token_hash: eq(hash(pair.token)) });
         const inv = await one('app_invitations', { id: eq(r.invitation_id) });
         const child = await one('users', { id: eq(inv.child_id) });
@@ -195,9 +208,9 @@ export function createApp(config: Config, dep: Dependencies) {
       }
       if (path === '/api/children' && method === 'GET') { requireParent(); return result({ children: await children(user) }); }
       if (path === '/api/children' && method === 'POST') {
-        requireParent(); const d = demographic(body); assert(d.display_name); const auth = await db.auth('admin/users', 'POST', { email: `child-${randomUUID()}@wishbridge.invalid`, password: randomToken(), email_confirm: true, app_metadata: { app_role: 'child' } }); const id = auth.id || auth.user?.id; assert(id, 502, 'DATABASE_ERROR');
+        requireParent(); const d = demographic(body); assert(d.display_name && d.birth_date, 400, 'INVALID_INPUT', '子どもの名前と誕生日を入力してください。'); validateSettings(body); const auth = await db.auth('admin/users', 'POST', { email: `child-${randomUUID()}@wishbridge.invalid`, password: randomToken(), email_confirm: true, app_metadata: { app_role: 'child' } }); const id = auth.id || auth.user?.id; assert(id, 502, 'DATABASE_ERROR');
         let registered = false;
-        try { const record = await db.rpc('wb_create_child', { p_actor_id: user.id, p_child_id: id, p_display_name: d.display_name, p_birth_date: d.birth_date || null, p_gender: d.gender || null, p_grade_level: d.grade_level || null, p_grade_base_school_year: d.grade_base_school_year || null }); registered = true; await saveSettings(user, id, body); return result(childView(record.user), 201); }
+        try { const record = await db.rpc('wb_create_child', { p_actor_id: user.id, p_child_id: id, p_display_name: d.display_name, p_birth_date: d.birth_date || null, p_gender: d.gender || null, p_grade_level: d.grade_level || null, p_grade_base_school_year: d.grade_base_school_year || null }); registered = true; try { await saveSettings(user, id, body); } catch { return result({ ...childView(record.user), settingsSaved: false }, 201); } return result({ ...childView(record.user), settingsSaved: true }, 201); }
         catch (e) { if (!registered) await db.auth(`admin/users/${id}`, 'DELETE').catch(() => {}); throw e; }
       }
       const childRoute = /^\/api\/children\/([\w-]+)(\/(settings|invitations))?$/.exec(path);
@@ -215,6 +228,7 @@ export function createApp(config: Config, dep: Dependencies) {
         }
       }
       async function saveSettings(actor: Row, id: string, input: Row) {
+        validateSettings(input);
         const old = await settings(id), patch: Row = { child_id: id, parent_id: actor.id, reward_guidelines: old.rewardGuidelines, constraints: old.constraints, chore_preferences: old.chorePreferences };
         if (input.rewardGuidelines) { const g = { ...old.rewardGuidelines }; for (const k of ['smallJpy', 'mediumJpy', 'largeJpy']) if (k in input.rewardGuidelines) g[k] = input.rewardGuidelines[k] === null ? null : integer(input.rewardGuidelines[k]); assert(g.smallJpy === null || g.mediumJpy === null || g.smallJpy <= g.mediumJpy); assert(g.mediumJpy === null || g.largeJpy === null || g.mediumJpy <= g.largeJpy); patch.reward_guidelines = g; }
         if (input.constraints) { patch.constraints = { ...old.constraints }; for (const k of ['mustHave', 'mustAvoid']) if (k in input.constraints) patch.constraints[k] = strings(input.constraints[k]); }
@@ -236,7 +250,7 @@ export function createApp(config: Config, dep: Dependencies) {
       }
       if (path === '/api/devices' && method === 'GET') {
         requireParent(); const cs = await children(user), ids = [user.id, ...cs.map(c => c.childId)]; const devices = await db.list('app_sessions', { user_id: listOf(ids), revoked_at: 'is.null', expires_at: `gt.${new Date().toISOString()}` });
-        return result({ devices: devices.map(d => ({ deviceSessionId: d.token_hash, role: d.user_id === user.id ? 'parent' : 'child', childId: d.user_id === user.id ? null : d.user_id, deviceLabel: d.device_label || '端末', createdAt: d.created_at, lastActiveAt: d.last_active_at, isCurrent: d.token_hash === session.row.token_hash })) });
+        return result({ devices: devices.map(d => ({ deviceSessionId: d.token_hash, role: d.user_id === user.id ? 'parent' : 'child', childId: d.user_id === user.id ? null : d.user_id, childDisplayName: cs.find(c => c.childId === d.user_id)?.displayName || null, deviceLabel: d.device_label || '端末', createdAt: d.created_at, lastActiveAt: d.last_active_at, isCurrent: d.token_hash === session.row.token_hash })) });
       }
       const device = /^\/api\/devices\/([a-f0-9]{64})$/.exec(path);
       if (device && method === 'DELETE') { reauth(); const d = await one('app_sessions', { token_hash: eq(device[1]) }); if (d.user_id !== user.id) await family(user, d.user_id); await db.update('app_sessions', { token_hash: eq(device[1]) }, { revoked_at: new Date().toISOString() }); if (device[1] === session.row.token_hash) setCookie('session', '', 0); return result({ deviceSessionId: device[1], revoked: true, currentDeviceRevoked: device[1] === session.row.token_hash }); }
@@ -264,10 +278,11 @@ export function createApp(config: Config, dep: Dependencies) {
         const c = (await db.insert('conversations', { user_id: user.id, child_id: id, context_proposal_id: reference?.id || null, products: pv ? [pv.product] : [], selected_product_id: pv?.product.id || null }))[0];
         return result(body.message ? await runAI(user, c.id, text(body.message)) : await chatView(user, c), 201);
       }
-      const conversation = /^\/api\/conversations\/([\w-]+)(\/(messages|selected-product|proposal-drafts))?$/.exec(path);
+      const conversation = /^\/api\/conversations\/([\w-]+)(\/(messages|selected-product|proposal-drafts|search))?$/.exec(path);
       if (conversation) {
         const c = await ownedChat(user, conversation[1]);
         if (!conversation[3] && method === 'GET') return result(await chatView(user, c));
+        if (conversation[3] === 'search' && method === 'POST') { const query = text(body.query, 300); return result(await runAI(user, c.id, `商品検索：${query}`, query)); }
         if (conversation[3] === 'messages' && method === 'POST') return result(await runAI(user, c.id, text(body.message)));
         if (conversation[3] === 'selected-product' && method === 'PATCH') return result(await chatView(user, await db.rpc('wb_select_product', { p_actor_id: user.id, p_conversation_id: c.id, p_product_id: uuid(body.selectedProductId) })));
         if (conversation[3] === 'proposal-drafts' && method === 'POST') return result(await runAI(user, c.id, null));

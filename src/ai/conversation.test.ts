@@ -693,3 +693,26 @@ test('個別相談の価格未確認・条件不適合でも交渉には移行�
         assert.equal('proposalDraft' in output, false);
     }
 });
+
+test('explicit product search skips hearing and uses only the supplied public query', async () => {
+    const requests: ConversationRequest[] = [];
+    const result = await createReply({ ...input(), mode: 'consultation', searchQuery: 'Switch スプラトゥーン' }, {
+        generate: searchQueue([grounded(), extraction()], requests), createId: () => product.id,
+    });
+    assert.equal(result.action, 'PRODUCT');
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].search, true);
+    const payload = JSON.parse(requests[0].input);
+    assert.equal(payload.query, 'Switch スプラトゥーン');
+    assert.equal(payload.history, undefined);
+    assert.equal(payload.profile, undefined);
+});
+
+test('parent and target child ages remain distinct in individual consultation', async () => {
+    let payload: any;
+    await createReply({ ...input(), mode: 'consultation', role: 'parent', childContext: { age: 9, gradeLevel: 4 } }, {
+        generate: async request => { payload = JSON.parse(request.input); return decision(); },
+    });
+    assert.deepEqual(payload.childContext, { age: 9, gradeLevel: 4 });
+    assert.deepEqual(payload.profile.age, input().profile?.age);
+});

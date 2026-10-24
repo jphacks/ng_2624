@@ -29,7 +29,7 @@ export async function createReply(
                 reply: 'この提案への承認が記録されています。提案の状態を確認してください。' };
         }
         const generate = dependencies.generate ?? generateGeminiReply;
-        const generated = await generate(buildConversationRequest(input));
+        const generated = input.searchQuery ? { text: JSON.stringify({ action: 'SEARCH', reply: '指定された条件で商品を探します。', searchQuery: input.searchQuery, persuasionText: null, purchaseConditions: [], constraintsSatisfied: false }) } : await generate(buildConversationRequest(input));
         if (typeof generated.text !== 'string' || !generated.text.trim()) {
             throw new ConversationError('EMPTY_RESPONSE', 'Geminiから返答がありませんでした。');
         }
