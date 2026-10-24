@@ -9,10 +9,12 @@
     "skipLibCheck": true,
     "types": [
       "node"
-    ]
+    ],
+    "erasableSyntaxOnly": true
   },
   "include": [
     "src/ai/**/*.ts",
-    "src/connection/**/*.ts"
+    "src/connection/**/*.ts",
+    "src/server/**/*.ts"
   ]
 }

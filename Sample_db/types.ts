@@ -64,6 +64,7 @@ export interface Proposal {
 }
 
 export interface AIUserProfile {
+  gradeLevel?: number | null;
   age: number | null;
   gender: Gender;
   preferences: { interests: string[]; wishes: string[]; expectations: string[] };
