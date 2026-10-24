@@ -2,6 +2,7 @@
 // image にファイルパス（例: 'images/game.png'）を入れると、絵文字の代わりに画像が表示される。
 window.DATA = {
   user: { name: 'たけし', avatar: '👦' },
+  parent: { name: 'おうちの人', avatar: '🧑' },
   ai: { name: 'ふぁみぽぽAI', avatar: '🕊️' },
 
   points: 1234,
@@ -35,10 +36,62 @@ window.DATA = {
     { from: 'me', text: 'いいね、そうする！' },
   ],
 
-  // トーク画面で送信したときの仮の返事（順番に使う）
+  // 子どものトークで送信したときの仮の返事（順番に使う）
+  // product: true の番では、AIが商品を探した想定で mockProductReply を返す。
   mockReplies: [
-    'なるほど！おうちの人にも伝えてみるね。',
-    'いいね！どの宿題からやってみる？',
-    '1日できなくても大丈夫。また明日から続けよう！',
+    { text: 'いいね！それは練習でつかうもの？それとも見て楽しむもの？' },
+    { product: true },
+    { text: '気になる商品があったら「これにする」をおしてね。おうちの人への提案を下書きするよ。' },
+    { text: '1日できなくても大丈夫。また明日から続けよう！' },
+  ],
+
+  // AIが商品を探したときの仮の返事（AIの返事 AIOutput と同じ形）
+  // URLは見本のページ。本物のAIにつなぐと実際の商品ページになる。
+  mockProductReply: {
+    action: 'PRODUCT',
+    reply: '大中小それぞれ1件の候補が見つかりました。気になるものを1つ選んでください。 表示価格は検索時の参考価格です。',
+    products: [
+      {
+        id: 'mock-1', size: 'small', name: 'サッカー練習用 マーカーコーン 10枚セット', priceJpy: 980,
+        productUrl: 'https://example.com/products/marker', imageUrl: null,
+        description: 'ドリブル練習に使えるコーン。', recommendationReason: 'ひとりでもドリブル練習ができるよ。',
+        sourceUrls: [],
+      },
+      {
+        id: 'mock-2', size: 'medium', name: 'サッカーボール 4号球（小学生用）', priceJpy: 3180,
+        productUrl: 'https://example.com/products/ball', imageUrl: null,
+        description: '小学生の公式サイズ。', recommendationReason: '練習でも試合でも使える大きさだよ。',
+        sourceUrls: [],
+      },
+      {
+        id: 'mock-3', size: 'large', name: 'ジュニア用 サッカースパイク', priceJpy: 9800,
+        productUrl: 'https://example.com/products/spike', imageUrl: null,
+        description: '芝・土の両方で使えるスパイク。', recommendationReason: '走りやすくなって、練習がもっと楽しくなるよ。',
+        sourceUrls: [],
+      },
+    ],
+    search: {
+      queries: [],
+      sources: [{ id: 'source-1', title: '見本ショップ', url: 'https://example.com/' }],
+      searchSuggestionsHtml: null,
+    },
+  },
+
+  // 「これにする」を押したときの提案の下書き（本番ではAIが作る）
+  // {name} は商品名、{deadline} は2週間後の日付に置き換わる。
+  draftTemplate: {
+    persuasionText: '「{name}」がほしいです。そのかわり、下のやくそくをがんばります。',
+    purchaseConditions: [
+      '今週の平日5日のうち4日、宿題を提出する',
+      '1日できなくても、つづけた記録はリセットしない',
+      '{deadline}まで',
+    ],
+  },
+
+  // 親のAIトークの仮の返事（順番に使う）
+  parentMockReplies: [
+    '条件は「平日5日のうち4日」で、1日休んでも続けられるようになっています。無理のない内容だと思います。',
+    '金額が気になる場合は、「修正をお願い」で期限を延ばしたり、条件を足したりできます。理由は子どもに伝わるので、やさしい言葉で書くのがおすすめです。',
+    '見送る場合も、理由を添えると子どもが次の提案を考えやすくなります。',
   ],
 };

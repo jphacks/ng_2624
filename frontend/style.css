@@ -13,6 +13,9 @@
   --bubble: #e8e8e8;
   --ai-ring: #4caf50;
   --me-ring: #4a90d9;
+  --primary: #1677c9; /* 白い文字をのせるボタン用（薄い水色だと文字が読みにくいため） */
+  --parent: #d9f2d0;
+  --parent-ink: #1d4a12;
 }
 
 * { box-sizing: border-box; }
@@ -61,10 +64,10 @@ button { font: inherit; color: inherit; }
 }
 .btn-pill svg { width: 24px; height: 24px; }
 
-/* ---------- ログイン ---------- */
-.screen-login {
+/* ---------- 初期画面（親として／子どもとして始める） ---------- */
+.screen-start {
   justify-content: space-between;
-  padding: 0 28px 16vh;
+  padding: 0 28px 12vh;
 }
 
 .tagline {
@@ -75,21 +78,110 @@ button { font: inherit; color: inherit; }
   letter-spacing: 0.04em;
 }
 
-.login-actions { text-align: center; }
+.start-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: center;
+}
 
-.btn-register {
+.btn-start {
   width: 100%;
-  height: 64px;
+  height: 60px;
   border: 0;
   border-radius: 6px;
-  background: var(--blue);
+  font-size: 18px;
+  cursor: pointer;
+}
+.btn-start-child { background: var(--primary); color: #fff; }
+.btn-start-parent { background: var(--parent); color: var(--parent-ink); }
+
+.start-hint { margin: 4px 0 0; font-size: 11px; color: var(--text-sub); line-height: 1.6; }
+
+/* ---------- 共通の部品 ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+.back-link { color: var(--link); font-size: 13px; text-decoration: none; }
+
+.role-chip {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--parent);
+  color: var(--parent-ink);
+  font-size: 12px;
+}
+
+.page-title { margin: 4px 0 0; font-size: 20px; font-weight: 700; }
+.page-lead { margin: 0; font-size: 13px; color: var(--text-sub); line-height: 1.6; }
+
+.field-label {
+  display: block;
+  margin: 0 0 6px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.screen-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 16px; /* 16px未満だとiPhoneで入力時に拡大される */
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.btn-primary {
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--primary);
   color: #fff;
-  font-size: 20px;
+  font-size: 17px;
   cursor: pointer;
 }
 
-.login-hint { margin: 18px 0 0; font-size: 12px; }
-.login-hint a { margin-left: 10px; color: var(--link); }
+.btn-text {
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font-size: 14px;
+  cursor: pointer;
+}
+.btn-text[hidden] { display: none; }
+
+.form-error {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #fde8e8;
+  color: #8a1c1c;
+  font-size: 13px;
+}
+.form-error[hidden] { display: none; }
+
+/* 提案の状態バッジ */
+.status-badge {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bubble);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.status-badge.is-pending { background: var(--yellow); }
+.status-badge.is-approved { background: #c8f0c0; color: #1d5a14; }
+.status-badge.is-revision_requested { background: #ffe2b8; color: #6b3d00; }
+.status-badge.is-rejected { background: #e6e6e6; color: var(--text-sub); }
 
 /* ---------- ホーム ---------- */
 .screen-home {
@@ -252,12 +344,71 @@ button { font: inherit; color: inherit; }
   font-size: 11px;
 }
 
+/* 子どもホーム：送った提案 */
+.my-proposals {
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: #f4f8ff;
+}
+.my-proposals[hidden] { display: none; }
+.my-proposals h2 { margin: 0 0 8px; font-size: 15px; font-weight: 700; }
+
+.my-proposal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.my-proposal {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff;
+}
+.my-proposal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.my-proposal-name { font-size: 13px; overflow-wrap: anywhere; }
+.my-proposal-note { margin: 6px 0 0; font-size: 12px; color: var(--text-sub); line-height: 1.5; overflow-wrap: anywhere; }
+
 /* ---------- トーク ---------- */
 .screen-talk {
   height: 100dvh;
   gap: 12px;
   padding: 16px 12px 20px;
 }
+
+.talk-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.privacy-label {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+/* 親のトーク：相談中の提案を上に固定して見せる */
+.pinned-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-left: 4px solid var(--parent-ink);
+  border-radius: 4px;
+  background: var(--parent);
+}
+.pinned-label { font-size: 10px; color: var(--parent-ink); }
+.pinned-name { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.pinned-meta { font-size: 11px; color: var(--text-sub); }
+
+.screen-parent .msg-me .avatar { border-color: var(--parent-ink); }
 
 .points-chip {
   display: inline-block;
@@ -382,14 +533,31 @@ button { font: inherit; color: inherit; }
   color: var(--text-sub);
 }
 
-.product-link {
+.product-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-top: 2px;
+}
+
+.product-link {
   padding: 4px 12px;
   border-radius: 999px;
   background: #fff;
   color: var(--link);
   font-size: 12px;
   text-decoration: none;
+}
+
+.product-choose {
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .product-sources {
@@ -453,4 +621,163 @@ button { font: inherit; color: inherit; }
   border-radius: 999px;
   background: var(--blue-soft);
   cursor: pointer;
+}
+
+/* ---------- 提案の確認・回答などのフォーム画面 ---------- */
+.screen-form {
+  gap: 14px;
+  padding: 16px 16px 28px;
+}
+
+.proposal-form,
+.answer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.answer-form[hidden] { display: none; }
+
+.conditions,
+.answer-form fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.condition-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.condition-item { display: flex; gap: 6px; }
+.condition-remove {
+  flex: none;
+  width: 44px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+/* 送信完了 */
+.screen-done {
+  justify-content: center;
+  gap: 24px;
+  padding: 24px 16px;
+}
+.done-card { text-align: center; }
+.done-emoji { font-size: 64px; }
+.done-card h1 { margin: 8px 0; font-size: 24px; }
+.done-card p { margin: 0; line-height: 1.8; }
+
+/* 親ホーム：届いた提案 */
+.proposal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.proposal-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.proposal-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.proposal-item-name { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.proposal-item-meta { font-size: 12px; color: var(--text-sub); }
+
+.empty-note {
+  margin: 24px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-sub);
+  line-height: 1.8;
+}
+.empty-note[hidden] { display: none; }
+
+/* 提案への回答 */
+.review-block { display: flex; flex-direction: column; }
+.review-text {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--bubble);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.review-conditions {
+  margin: 0;
+  padding-left: 1.4em;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.btn-consult { background: var(--parent); color: var(--parent-ink); }
+
+.decision-group {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.decision {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 6px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+}
+/* ラジオボタン自体は見えなくして、枠全体を選択肢にする */
+.decision input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.decision:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 2px; }
+.decision-yes:has(input:checked) { border-color: #2e7d32; background: #c8f0c0; }
+.decision-revise:has(input:checked) { border-color: #b26a00; background: #ffe2b8; }
+.decision-no:has(input:checked) { border-color: #616161; background: #e6e6e6; }
+
+#answer-reason-wrap[hidden] { display: none; }
+
+.answer-result {
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--bubble);
+}
+.answer-result[hidden] { display: none; }
+.answer-result:focus { outline: none; }
+.answer-result.is-approved { background: #c8f0c0; }
+.answer-result.is-revision_requested { background: #ffe2b8; }
+.answer-result h2 { margin: 0 0 6px; font-size: 17px; }
+.answer-result p { margin: 0; font-size: 13px; line-height: 1.6; }
+.answer-result blockquote {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
