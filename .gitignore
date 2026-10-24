@@ -2,5 +2,3 @@ node_modules/
 .env
 .env.*
 !.env.example
-
-/参考資料/
