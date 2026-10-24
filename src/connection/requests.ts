@@ -43,15 +43,19 @@ const proposalRef = { proposalId: id, version: integer(1) };
 
 /** 型・検証・Wordの一覧で共用する定義。運用上の権限照合はBEで別途必要。 */
 export const FE_REQUEST_DEFINITIONS: Record<FEOperation, FERequestDefinition> = {
+  'profile.get': definition('本人のプロフィールを取得', 'settings', object({}), read),
   'profile.update': definition('本人のプロフィールを更新', 'settings', ownProfile,
     { note: '省略した項目は保持。本人のプロフィールは認証から特定。空の更新は不可。' }),
   'child.create': definition('子供プロフィールを作成', 'settings', object({ displayName: str(100) }), parent),
   'child.rename': definition('子供の表示名を変更', 'settings', object({ childId: id, displayName: str(100) }), parent),
+  'child.settings.get': definition('子供別の目安金額・条件を取得', 'settings', object({ childId: id }), { ...parent, ...read }),
   'child.settings.update': definition('子供別の目安金額・条件を更新', 'settings', object({ childId: id,
     rewardGuidelines: object({ smallJpy: nullable(integer(0)), mediumJpy: nullable(integer(0)), largeJpy: nullable(integer(0)) }, [], 1),
     constraints: object({ mustHave: strings(), mustAvoid: strings() }, [], 1),
   }, ['childId'], 2), { ...parent, note: 'childIdと変更する項目を送信。省略は保持、金額のnullは未設定、[]はリストの全消去。' }),
   'children.list': definition('保護者に紐付く子供の一覧を取得', 'settings', object({}), { ...parent, ...read }),
+  'conversations.list': definition('本人の個別相談一覧を取得', 'conversation', object({}), read),
+  'negotiations.list': definition('参加している共有交渉一覧を取得', 'conversation', object({}), read),
   'conversation.create': definition('個別相談を作成', 'conversation', object({ childId: id, message: nullable(str()) }, []),
     { note: '親が対象の子供を指定する場合だけchildId。子供本人は認証から特定。作成だけなら本文なし。最初の発言をまとめる場合はmessage。' }),
   'conversation.get': definition('個別相談を取得', 'conversation', object({ conversationId: id }), read),
@@ -93,6 +97,8 @@ export const FE_REQUEST_DEFINITIONS: Record<FEOperation, FERequestDefinition> = 
     { authentication: 'pairing', roles: [], csrf: false, note: '申請時の仮セッションで端末を確認。IDだけでは結果・セッションを渡さない。' }),
   'pairing.respond': definition('保護者が子供端末の接続を承認・拒否', 'auth', object({ pairingRequestId: id,
     decision: enumeration('approved', 'rejected') }), important),
+  'pairing.complete': definition('承認済みの接続を子供端末で確定', 'auth', object({ pairingRequestId: id }),
+    { authentication: 'pairing', roles: [], note: '申請時の仮CookieとCSRFヘッダーを使う。承認済みの場合だけ通常のログインCookieへ切り替える。' }),
   'device.revoke': definition('保護者が端末を解除', 'auth', object({ deviceSessionId: id }), important),
 };
 

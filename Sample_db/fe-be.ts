@@ -25,14 +25,18 @@ export type GoogleAuthCallback =
   | { error: string; state: string; code?: never };
 
 /** 操作キーはBEのルート等から決める内部識別子。JSON本文へ追加する変数ではない。
- * IDはURL等から取り出してここへまとめてもよい。履歴・role・時刻をFEから受け取らない。
+ * URL内のIDとJSON本文の項目をまとめた型。配置はFE_HTTP_DEFINITIONSで定義する。
  */
 export interface FERequestMap {
+  'profile.get': Record<string, never>;
   'profile.update': OwnProfileUpdate;
   'child.create': { displayName: string };
   'child.rename': { childId: string; displayName: string };
+  'child.settings.get': { childId: string };
   'child.settings.update': ChildSettingsUpdate;
   'children.list': Record<string, never>;
+  'conversations.list': Record<string, never>;
+  'negotiations.list': Record<string, never>;
   'conversation.create': { childId?: string; message?: string | null };
   'conversation.get': { conversationId: string };
   'conversation.message': { conversationId: string; message: string };
@@ -59,6 +63,7 @@ export interface FERequestMap {
   'pairing.request': { invitationToken: string };
   'pairing.status': { pairingRequestId: string };
   'pairing.respond': { pairingRequestId: string; decision: 'approved' | 'rejected' };
+  'pairing.complete': { pairingRequestId: string };
   'device.revoke': { deviceSessionId: string };
 }
 export type FEOperation = keyof FERequestMap;

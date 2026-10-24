@@ -6,11 +6,15 @@ import { FEInputError, FE_REQUEST_DEFINITIONS, parseFERequest, parseGoogleAuthCa
 import { AUTH_POLICY, applyProfilePatch, roleMayCall, sessionStatus } from './policy.ts';
 
 const examples: { [K in FEOperation]: FERequestMap[K] } = {
+  'profile.get': {},
   'profile.update': { profile: { age: null, preferences: { interests: [] } } },
   'child.create': { displayName: '子供' },
   'child.rename': { childId: 'child-1', displayName: '子供' },
+  'child.settings.get': { childId: 'child-1' },
   'child.settings.update': { childId: 'child-1', rewardGuidelines: { smallJpy: 0, mediumJpy: null } },
   'children.list': {},
+  'conversations.list': {},
+  'negotiations.list': {},
   'conversation.create': {},
   'conversation.get': { conversationId: 'conversation-1' },
   'conversation.message': { conversationId: 'conversation-1', message: '相談したい' },
@@ -37,6 +41,7 @@ const examples: { [K in FEOperation]: FERequestMap[K] } = {
   'pairing.request': { invitationToken: 'example-invitation-token' },
   'pairing.status': { pairingRequestId: 'pairing-1' },
   'pairing.respond': { pairingRequestId: 'pairing-1', decision: 'approved' },
+  'pairing.complete': { pairingRequestId: 'pairing-1' },
   'device.revoke': { deviceSessionId: 'device-1' },
 };
 for (const operation of Object.keys(examples) as FEOperation[]) {
