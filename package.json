@@ -20,9 +20,11 @@
   },
   "homepage": "https://github.com/RyosukeOkazaki-0408/JPHACKS-Prep#readme",
   "dependencies": {
-    "@google/genai": "^2.30.0"
+    "@google/genai": "^2.30.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
     "@types/node": "^26.6.5",
     "supabase": "^2.121.0",
     "typescript": "^7.0.2"
