@@ -15,7 +15,8 @@
       <div class="start-actions">
         <button type="button" class="btn-start btn-start-child" data-role="child">子どもとして始める</button>
         <button type="button" class="btn-start btn-start-parent" data-role="parent">親として始める</button>
-        <p class="start-hint">試作版：同じブラウザで切り替えると、子どもが送った提案が親の画面に届きます</p>
+        <p class="form-error" id="start-error" role="alert" hidden></p>
+        <p class="start-hint" id="start-hint"></p>
       </div>
     </section>
 
@@ -201,6 +202,7 @@
   </div>
 
   <script src="data.js"></script>
+  <script src="api.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

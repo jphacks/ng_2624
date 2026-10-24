@@ -19,6 +19,7 @@ const STATIC_FILES: Record<string, [file: string, type: string]> = {
   '/': ['index.html', 'text/html'],
   '/index.html': ['index.html', 'text/html'],
   '/app.js': ['app.js', 'text/javascript'],
+  '/api.js': ['api.js', 'text/javascript'],
   '/data.js': ['data.js', 'text/javascript'],
   '/style.css': ['style.css', 'text/css'],
 };
