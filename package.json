@@ -4,7 +4,7 @@
   "description": "コード保管用に作成した仮リポジトリです",
   "main": "index.js",
   "scripts": {
-    "test": "node --test src/ai/conversation.test.ts",
+    "test": "node --test src/ai/conversation.test.ts src/connection/connection.test.ts src/connection/http.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "repository": {
