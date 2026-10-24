@@ -367,22 +367,34 @@ test('公開入口で検索した出力をそのまま次の提案・修正の�
 });
 
 for (const role of ['parent', 'child'] as const) {
-    for (const action of ['SEARCH', 'PROPOSAL', 'NEGOTIATION'] as const) {
-        test(`${role}の非公開相談から${action}へ進めず、生成されたクエリ・下書きも返さない`, async () => {
-            const requests: ConversationRequest[] = [];
-            const value: AIInput = { ...input(), role, mode: 'consultation', products: [product], selectedProductId: product.id };
-            const output = await createReply(value, { generate: searchQueue([
-                draft({ action, reply: '非公開情報を含む提案', searchQuery: '秘密の検索クエリ' }),
-            ], requests) });
-            assert.equal(requests.length, 1);
-            assert.equal(output.action, 'HEARING');
-            assert.equal(output.search, null);
-            assert.equal('proposalDraft' in output, false);
-            assert.equal(JSON.stringify(output).includes('非公開情報'), false);
-            assert.deepEqual((requests[0].schema?.properties as Record<string, unknown>).action,
-                { type: 'string', enum: ['HEARING'] });
+    test(`${role}の個別相談で本人の情報を使って商品を検索でき、公開検索へ履歴を直接渡さない`, async () => {
+        const value: AIInput = { ...input(), role, mode: 'consultation', sharedConditions: [],
+            message: '本人専用の希望PRIVATE',
+            profile: { ...input().profile!, preferences: { interests: ['本人の興味PRIVATE'], wishes: [], expectations: [] } },
+            history: [{ ...input().history[0], content: '本人専用の事情PRIVATE' }] };
+        const before = structuredClone(value);
+        const requests: ConversationRequest[] = [];
+        const result = await createReply(value, { generate: searchQueue([SEARCH(), grounded(), extraction()], requests) });
+        assert.equal(result.action, 'PRODUCT');
+        const payload = JSON.parse(requests[0].input);
+        assert.equal(payload.message, value.message);
+        assert.equal(payload.history[0].content, value.history[0].content);
+        assert.deepEqual(payload.profile.preferences, value.profile!.preferences);
+        assert.deepEqual((requests[0].schema?.properties as Record<string, unknown>).action,
+            { type: 'string', enum: ['HEARING', 'SEARCH', 'PROPOSAL'] });
+        for (const request of requests.slice(1)) {
+            assert.equal(request.input.includes('PRIVATE'), false);
+            for (const field of ['message', 'history', 'profile']) assert.equal(field in JSON.parse(request.input), false);
+        }
+        assert.deepEqual(value, before);
+    });
+    test(`${role}の個別相談から共有交渉へモデルの判断で移行しない`, async () => {
+        const output = await createReply({ ...input(), role, mode: 'consultation' }, {
+            generate: async () => draft({ action: 'NEGOTIATION' }),
         });
-    }
+        assert.equal(output.action, 'HEARING');
+        assert.equal('proposalDraft' in output, false);
+    });
     test(`${role}の検索・整形・提案・再交渉の全リクエストに非公開情報を含めない`, async () => {
         const value = { ...input(), role, message: '公開の変更希望MESSAGE',
             negotiationHistory: [{ id: 'public-1', sender: 'parent' as const, content: '公開済みの希望HISTORY', createdAt: NOW, token: 'SECRET' }],
@@ -439,7 +451,7 @@ test('BEの承認結果を個別相談へ渡すが、AI出力で承認や合意�
         negotiationResult: { proposalId: proposal.id, version: proposal.version, decision: 'approved', reason: null } };
     const output = await createReply(value, { generate: async request => {
         assert.deepEqual(JSON.parse(request.input).negotiationResult, value.negotiationResult);
-        assert.match(request.systemInstruction, /承認を合意成立と解釈/);
+        assert.match(request.systemInstruction, /AIの判断で合意成立を確定/);
         return decision();
     } });
     assert.equal(output.action, 'HEARING');
@@ -608,3 +620,76 @@ for (const [label, changes] of [
             { generate: async () => assert.fail('must not call model') }), hasCode('INVALID_INPUT'));
     });
 }
+
+
+test('個別相談で検索→商品選択ボタン→交渉IDなしの初回提案を作成できる', async () => {
+    const privateInput: AIInput = { ...input(), mode: 'consultation', sharedConditions: [] };
+    const found = await createReply(privateInput, { generate: searchQueue([SEARCH(), grounded(), extraction()]), createId: () => product.id });
+    if (found.action !== 'PRODUCT') return assert.fail('expected products');
+    const selected: AIInput = { ...privateInput, message: null, products: found.products, selectedProductId: product.id };
+    const draftResult = await createReply(selected, { generate: async request => {
+        assert.equal(JSON.parse(request.input).message, null);
+        return draft();
+    } });
+    if (draftResult.action !== 'PROPOSAL') return assert.fail('expected proposal');
+    assert.equal(draftResult.proposalDraft.target, 'parent');
+    assert.equal(draftResult.proposalDraft.basedOn, null);
+    const savedDraft: Proposal = { ...proposal, negotiationId: null, version: 1, status: 'draft' };
+    const revised = await createReply({ ...selected, currentProposal: savedDraft }, { generate: async () => draft() });
+    if (revised.action !== 'PROPOSAL') return assert.fail('expected private proposal');
+    assert.deepEqual(revised.proposalDraft.basedOn, { proposalId: savedDraft.id, version: 1 });
+});
+
+test('親のYesボタンでは交渉もGemini呼び出しも行わない', async () => {
+    const value: AIInput = { ...input(), mode: 'consultation', role: 'parent', message: null,
+        history: [], profile: null, products: [product], currentProposal: { ...proposal, negotiationId: null },
+        negotiationResult: { proposalId: proposal.id, version: proposal.version, decision: 'approved', reason: null } };
+    const before = structuredClone(value);
+    const output = await createReply(value, { generate: async () => assert.fail('approved must skip Gemini') });
+    assert.equal(output.action, 'HEARING');
+    assert.equal('proposalDraft' in output, false);
+    assert.equal('status' in output, false);
+    assert.deepEqual(value, before);
+});
+
+test('親のNoボタンは発言なしでも理由を共有交渉へ渡し、個別相談は混ぜない', async () => {
+    const value: AIInput = { ...input(), role: 'parent', message: null, products: [product], currentProposal: proposal,
+        negotiationResult: { proposalId: proposal.id, version: proposal.version, decision: 'rejected', reason: '宿題は3日ならよい。' } };
+    const output = await createReply(value, { generate: async request => {
+        const payload = JSON.parse(request.input);
+        assert.equal(payload.message, null);
+        assert.deepEqual(payload.negotiationResult, value.negotiationResult);
+        assert.equal('history' in payload, false);
+        assert.equal('profile' in payload, false);
+        return draft({ action: 'NEGOTIATION', purchaseConditions: ['宿題を3日提出する'] });
+    } });
+    if (output.action !== 'NEGOTIATION') return assert.fail('expected negotiation');
+    assert.equal(output.proposalDraft?.target, 'child');
+    assert.deepEqual(output.proposalDraft?.basedOn, { proposalId: proposal.id, version: proposal.version });
+});
+
+test('発言なしの共有交渉でも、選択済み商品と対象提案から修正下書きを作れる', async () => {
+    const output = await createReply({ ...input(), message: null, products: [product],
+        selectedProductId: product.id, currentProposal: proposal }, { generate: async () => draft({ action: 'NEGOTIATION' }) });
+    assert.equal(output.action, 'NEGOTIATION');
+});
+
+test('発言も操作対象もない入力は通信前に拒否する', async () => {
+    for (const mode of ['consultation', 'negotiation'] as const) {
+        await assert.rejects(createReply({ ...input(), mode, message: null }, {
+            generate: async () => assert.fail('must not call model'),
+        }), hasCode('INVALID_INPUT'));
+    }
+});
+
+test('個別相談の価格未確認・条件不適合でも交渉には移行しない', async () => {
+    for (const changes of [
+        { products: [{ ...product, priceJpy: null }] },
+        { products: [product], rewardGuidelines: { ...input().rewardGuidelines, mediumJpy: null } },
+    ]) {
+        const output = await createReply({ ...input(), mode: 'consultation', message: null,
+            selectedProductId: product.id, ...changes }, { generate: async () => draft() });
+        assert.equal(output.action, 'HEARING');
+        assert.equal('proposalDraft' in output, false);
+    }
+});

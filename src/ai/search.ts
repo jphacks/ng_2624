@@ -1,4 +1,4 @@
-import type { NegotiationContext, ProductCandidate, SearchMetadata } from '../../Sample_db/types.ts';
+import type { ProductSearchContext, ProductCandidate, SearchMetadata } from '../../Sample_db/types.ts';
 import type { ReplyGenerator, GenerationResult } from './gemini.ts';
 import { buildExtractionRequest, buildSearchRequest } from './prompt.ts';
 import { parseProducts } from './protocol.ts';
@@ -17,7 +17,7 @@ function supportedPrice(price: number | null, quote: string | null, sourceIds: s
 }
 
 export async function searchProducts(
-    query: string, input: NegotiationContext, generate: ReplyGenerator, createId: () => string,
+    query: string, input: ProductSearchContext, generate: ReplyGenerator, createId: () => string,
 ): Promise<{ products: ProductCandidate[]; search: SearchMetadata }> {
     const result = await generate(buildSearchRequest(query, input));
     const search: SearchMetadata = result.search ?? { queries: [], sources: [], searchSuggestionsHtml: null };
