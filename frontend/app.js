@@ -7,6 +7,9 @@
   // 画面の状態。会話や提案の中身はバックエンド（仮モードでは仮バックエンド）が持ち、
   // ここには「どれを見ているか」と、取得した結果の控えだけを持つ。
   const state = {
+    rewardProducts: [],
+    rewardSources: [],
+    tasksExpanded: false,
     role: null, // 'child' | 'parent'
     points: DATA.points,
     tasks: DATA.tasks.map((t) => ({ ...t })),
@@ -111,7 +114,7 @@
     hideError('start-error');
     let hint = API.mode === 'mock'
       ? '試作版（仮のバックエンドで動作中）：同じブラウザで切り替えると、子どもが送った提案が親の画面に届きます'
-      : 'バックエンドに接続しています';
+      : 'おうちの人はGoogleアカウントでログインできます。';
     if (API.mode === 'mock' && API.aiMode === 'supabase') hint += '（子どものトークのAIの返事だけ、本物のバックエンドにつないでいます）';
     $('start-hint').textContent = hint;
   }
@@ -156,12 +159,12 @@
     if (rest === 0) {
       info.replaceChildren(el('span', 'goal-ready', 'こうかんできるよ！'));
     } else {
-      const restLine = el('span');
-      restLine.append(el('b', 'num-big', rest.toLocaleString('ja-JP')), el('span', 'unit', ' pt'));
-      const weekLine = el('span');
-      weekLine.append(el('b', 'num-mid', String(weeksNeeded(goal))), el('span', 'unit', ' 週間かかります'));
-      info.replaceChildren(el('span', 'unit', 'あと'), restLine, el('span', 'unit', '必要です'), weekLine);
+      const line = el('span', 'goal-remaining', 'あと ');
+      line.append(el('b', 'num-big', rest.toLocaleString('ja-JP')), ' pt');
+      info.replaceChildren(line);
     }
+    $('goal-progress').value = Math.min(100, state.points / goal.requiredPoints * 100);
+    $('goal-estimate').textContent = rest === 0 ? 'もくひょうたっせい！' : '目標まで ' + weeksNeeded(goal) + ' 週間くらい';
 
     const subs = $('sub-goals');
     subs.replaceChildren();
@@ -169,7 +172,7 @@
       const btn = el('button', 'goal-sub');
       btn.type = 'button';
       btn.setAttribute('aria-label', sub.name + 'の詳細');
-      btn.append(goalVisual(sub));
+      btn.append(goalVisual(sub), el('span', 'goal-sub-label', sub.name));
       btn.addEventListener('click', () => openSheet(sub));
       subs.append(btn);
     });
@@ -220,12 +223,16 @@
   function renderTasks() {
     const list = $('task-list');
     list.replaceChildren();
-    state.tasks.forEach((task) => {
+    (state.tasksExpanded ? state.tasks : state.tasks.slice(0, 2)).forEach((task) => {
       const submitted = task.status === 'submitted';
       const btn = el('button', 'task' + (submitted ? ' is-submitted' : ''));
       btn.type = 'button';
       btn.setAttribute('aria-pressed', String(submitted));
+      const icon = /そうじ/.test(task.title) ? '🧹' : /しょっき/.test(task.title) ? '🍽️' : /おんどく/.test(task.title) ? '📖' : '✏️';
+      const taskIcon = el('span', 'task-icon', icon);
+      taskIcon.setAttribute('aria-hidden', 'true');
       btn.append(
+        taskIcon,
         el('span', 'task-title', task.title),
         submitted ? el('span', 'badge', '承認待ち') : el('span', 'task-due', '期限 ' + task.due),
         el('span', 'task-reward', '¥' + task.reward),
@@ -240,6 +247,14 @@
       list.append(li);
     });
   }
+
+  $('goal-details').addEventListener('click', () => openSheet(DATA.mainGoal));
+  $('task-toggle').addEventListener('click', () => {
+    state.tasksExpanded = !state.tasksExpanded;
+    $('task-toggle').setAttribute('aria-expanded', String(state.tasksExpanded));
+    $('task-toggle').textContent = state.tasksExpanded ? 'とじる ⌃' : 'ぜんぶみる ›';
+    renderTasks();
+  });
 
   // ---- お手伝いの提案（子ども → 親） ----
   // 子どもは「やること」だけを提案し、ごほうびと期限は親が承認するときに決める。
@@ -331,11 +346,13 @@
     link.hidden = !goal.url;
     link.href = goal.url || '#';
     $('sheet').hidden = false;
+    document.querySelector('.app').inert = true;
     $('sheet-close').focus();
   }
 
   function closeSheet() {
     $('sheet').hidden = true;
+    document.querySelector('.app').inert = false;
     if (lastFocus) lastFocus.focus();
   }
 
@@ -344,7 +361,15 @@
     if (e.target === e.currentTarget) closeSheet();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('sheet').hidden) closeSheet();
+    if ($('sheet').hidden) return;
+    if (e.key === 'Escape') closeSheet();
+    if (e.key === 'Tab') {
+      const nodes = [...$('sheet').querySelectorAll('a[href], button')].filter((node) => !node.hidden);
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
   });
 
   // ---- 商品カード ----
@@ -363,7 +388,8 @@
       img.alt = '';
       visual.append(img);
     } else {
-      visual.append(el('span', 'goal-emoji', '🎁'));
+      const emoji = /ボール/.test(product.name) ? '⚽' : /スパイク|シューズ/.test(product.name) ? '👟' : /コーン/.test(product.name) ? '🔺' : '🎁';
+      visual.append(el('span', 'goal-emoji', emoji));
     }
 
     const info = el('div', 'product-info');
@@ -412,13 +438,18 @@
   function messageEl(msg, me, onChoose) {
     const who = msg.from === 'ai' ? DATA.ai : me;
     const row = el('div', 'msg ' + (msg.from === 'ai' ? 'msg-ai' : 'msg-me'));
-    const avatar = el('span', 'avatar', who.avatar);
+    const avatar = el('span', 'avatar' + (msg.from === 'ai' ? ' dove' : ''), msg.from === 'ai' ? '' : who.avatar);
     avatar.setAttribute('aria-hidden', 'true');
     const body = el('div', 'msg-body');
     const bubbleClass = 'bubble' + (msg.typing ? ' typing' : '') + (msg.error ? ' is-error' : '');
     body.append(el('span', 'msg-name', who.name), el('p', bubbleClass, msg.text));
     if (msg.products && msg.products.length) {
-      body.append(productListEl(msg.products, msg.sources || [], onChoose));
+      if (onChoose) {
+        const link = el('button', 'product-choose reward-chat-link', 'ごほうびの候補をみる →');
+        link.type = 'button';
+        link.dataset.go = 'rewards';
+        body.append(link);
+      } else body.append(productListEl(msg.products, msg.sources || [], onChoose));
     }
     row.append(avatar, body);
     return row;
@@ -456,6 +487,11 @@
     // バックエンドから受け取った会話を、そのまま描き直す
     function render(view) {
       const output = view.latestAIOutput;
+      if (listId === 'child-messages') {
+        state.rewardProducts = view.products;
+        state.rewardSources = output && output.search ? output.search.sources : [];
+        $('show-rewards').hidden = !view.products.length;
+      }
       const assistants = view.messages.filter((m) => m.sender === 'assistant');
       if (output && output.action === 'PRODUCT' && assistants.length) {
         productAnchorId = assistants[assistants.length - 1].id;
@@ -564,22 +600,39 @@
   }
 
   // 「これにする」→ 商品を選ぶ → AIが提案の下書きを作る → 編集画面へ
+  let choosingProduct = false;
   async function chooseProduct(product, button) {
-    const buttons = document.querySelectorAll('#child-messages .product-choose');
+    if (choosingProduct) return;
+    choosingProduct = true;
+    const buttons = document.querySelectorAll('#reward-products .product-choose');
     buttons.forEach((b) => { b.disabled = true; });
     button.textContent = '下書き中…';
+    hideError('reward-error');
+    const id = state.childConversationId;
     try {
-      const id = state.childConversationId;
       await API.conversations.selectProduct(id, product.id);
       const view = await API.conversations.generateProposal(id);
       if (!view.currentProposal) throw new Error('提案の下書きを受け取れませんでした。');
+      if (state.role !== 'child' || state.childConversationId !== id) return;
       state.editing = { proposal: view.currentProposal, product };
-      location.hash = 'edit';
+      if (location.hash === '#rewards') location.hash = 'edit';
     } catch (err) {
-      childChat.append({ from: 'ai', text: API.errorMessage(err), error: true });
+      showError('reward-error', API.errorMessage(err));
+    } finally {
+      choosingProduct = false;
       buttons.forEach((b) => { b.disabled = false; });
       button.textContent = 'これにする';
     }
+  }
+
+  function renderRewards() {
+    hideError('reward-error');
+    const box = $('reward-products');
+    if (!state.rewardProducts.length) {
+      box.replaceChildren(el('p', 'empty-note', 'まずはぽぽに、ほしいものを教えてね。そうだんすると、ここに候補が届くよ。'));
+      return;
+    }
+    box.replaceChildren(productListEl(state.rewardProducts, state.rewardSources, chooseProduct));
   }
 
   // ---- T2 提案の確認・送信（子ども） ----
@@ -975,6 +1028,7 @@
     start: { role: null, render: renderStart },
     home: { role: 'child', render: renderHome },
     talk: { role: 'child', render: renderTalk },
+    rewards: { role: 'child', render: renderRewards },
     edit: { role: 'child', render: renderEdit },
     sent: { role: 'child', render: () => {} },
     'task-propose': { role: 'child', render: renderTaskPropose },
@@ -1008,6 +1062,8 @@
     });
     SCREENS[name].render(isCurrent);
     window.scrollTo(0, 0);
+    const heading = document.querySelector('[data-screen="' + name + '"] h1');
+    if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }
 
   document.addEventListener('click', (e) => {

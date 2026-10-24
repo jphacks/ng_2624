@@ -3,18 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WishBridge</title>
+  <title>ふぁみぽぽ｜がんばりと、ほしいをつなぐ</title>
+  <meta name="theme-color" content="#f6fcff">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="app">
+    <header class="brand-header">
+      <a class="brand" href="#start" aria-label="ふぁみぽぽ はじめの画面へ">ふぁみぽぽ<span class="dove" aria-hidden="true"></span></a>
+      <span class="brand-caption">がんばる毎日に、小さなしあわせ。</span>
+    </header>
 
     <!-- S0 初期画面：親として／子どもとして始める -->
     <section class="screen screen-start" data-screen="start">
-      <p class="tagline">がんばりと「ほしい」を、<br>親子でつなぐ</p>
+      <div class="welcome">
+        <span class="welcome-label">きみの「できた！」が、羽ばたく。</span>
+        <div class="welcome-dove dove" aria-hidden="true"></div>
+        <h1 class="tagline">がんばりと「ほしい」を、<br>親子でつなぐ。</h1>
+        <p class="welcome-note">ちいさながんばりを、ひとつずつ。<br>ぽぽと一緒に、夢への一歩をはじめよう。</p>
+      </div>
       <div class="start-actions">
-        <button type="button" class="btn-start btn-start-child" data-role="child">子どもとして始める</button>
-        <button type="button" class="btn-start btn-start-parent" data-role="parent">親として始める</button>
+        <button type="button" class="btn-start btn-start-child" data-role="child"><span aria-hidden="true">🌱</span> 子どもとしてはじめる <span aria-hidden="true">→</span></button>
+        <button type="button" class="btn-start btn-start-parent" data-role="parent"><span aria-hidden="true">🏡</span> おうちの人はこちら <span aria-hidden="true">→</span></button>
         <p class="form-error" id="start-error" role="alert" hidden></p>
         <p class="start-hint" id="start-hint"></p>
       </div>
@@ -26,7 +36,7 @@
         <a class="back-link" href="#start">← はじめの画面</a>
       </div>
       <div class="points-oval">
-        <span class="points-label">どりょくポイント</span>
+        <span class="points-label">どりょくポイント <span aria-hidden="true">★</span></span>
         <span class="points-value"><span id="home-points"></span><small>pt</small></span>
       </div>
       <p class="pace">週平均ペース：<span id="home-pace"></span>pt</p>
@@ -38,14 +48,14 @@
 
       <div class="goals">
         <article class="goal-main">
-          <h2 class="goal-title">大目標</h2>
+          <div class="section-heading"><h2 class="goal-title">ほしいもの</h2><button type="button" class="section-link" id="goal-details">くわしくみる ›</button></div>
           <div class="goal-body">
             <div class="goal-photo">
               <div class="goal-photo-box" id="main-goal-visual"></div>
-              <span class="goal-name" id="main-goal-name"></span>
             </div>
             <div class="goal-side">
-              <div class="goal-info" id="main-goal-info"></div>
+              <h3 class="goal-name" id="main-goal-name"></h3>
+              <div class="goal-info" id="main-goal-info"></div><progress id="goal-progress" max="100" value="0" aria-label="ほしいものまでの進み具合"></progress><p class="goal-estimate" id="goal-estimate"></p>
               <a class="goal-link" id="main-goal-link" target="_blank" rel="noopener noreferrer">詳細（リンク）</a>
             </div>
           </div>
@@ -54,7 +64,7 @@
       </div>
 
       <section class="tasks">
-        <h2>課題一覧</h2>
+        <div class="section-heading"><h2>きょうのおてつだい</h2><button type="button" class="section-link" id="task-toggle" aria-expanded="false">ぜんぶみる ›</button></div><p class="sample-note">サンプルのおてつだい・ごほうび（円）</p>
         <ul class="task-list" id="task-list"></ul>
 
         <!-- 子どもが提案したお手伝い（親の返事を待っているもの・返事が来たもの） -->
@@ -67,16 +77,17 @@
 
       <button type="button" class="btn-pill" data-go="talk">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>
-        AIとおしゃべり
+        ぽぽにそうだん
       </button>
     </section>
 
     <!-- T1 子どものトーク（個別相談） -->
     <section class="screen screen-talk" data-screen="talk" hidden>
       <div class="talk-header">
-        <span class="points-chip">どりょくポイント：<span id="talk-points"></span> P</span>
+        <span class="points-chip">どりょくポイント：<span id="talk-points"></span> pt</span>
         <span class="privacy-label">ここはあなたとAIだけのおはなし</span>
       </div>
+      <div class="chat-intro"><span class="dove" aria-hidden="true"></span><div><h1>ぽぽにそうだん</h1><p>ほしいものも、がんばったことも。</p></div><button type="button" class="section-link" id="show-rewards" data-go="rewards" hidden>ごほうびを見る ›</button></div>
       <div class="messages" id="child-messages" aria-live="polite"></div>
       <form class="composer" id="child-composer">
         <input type="text" placeholder="メッセージを入力" autocomplete="off" aria-label="メッセージ">
@@ -86,6 +97,16 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 3l9 8v10h-6v-6H9v6H3z"/></svg>
         ホーム画面
       </button>
+    </section>
+
+    <section class="screen screen-form screen-rewards" data-screen="rewards" hidden>
+      <div class="topbar"><a class="back-link" href="#home">← ホームにもどる</a><a class="back-link" href="#talk">そうだんにもどる</a></div>
+      <p class="eyebrow">きみのがんばり、その先に。</p>
+      <h1 class="reward-heading">ごほうびをえらぼう<span aria-hidden="true"> ✨</span></h1>
+      <p class="page-lead">ぽぽが見つけた、きみにぴったりの候補だよ。</p>
+      <div id="reward-products" aria-live="polite"></div>
+      <p class="form-error" id="reward-error" role="alert" hidden></p>
+      <button type="button" class="btn-pill" data-go="talk">ぽぽにそうだんする</button>
     </section>
 
     <!-- T2 提案の確認・送信（子ども） -->
@@ -151,7 +172,7 @@
         <a class="back-link" href="#start">← はじめの画面</a>
         <span class="role-chip">おうちの人</span>
       </div>
-      <h1 class="page-title">届いた提案</h1>
+      <p class="eyebrow">親子の「やってみたい」を、一緒に。</p><h1 class="page-title">届いた提案 <span aria-hidden="true">💌</span></h1>
 
       <h2 class="section-title">ほしいもの</h2>
       <ul class="proposal-list" id="parent-proposals"></ul>
