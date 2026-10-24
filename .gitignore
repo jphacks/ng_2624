@@ -6,3 +6,12 @@ node_modules/
 supabase/.branches/
 supabase/.temp/
 /docs/
+# Local environment variables and API secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
