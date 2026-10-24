@@ -1,17 +1,12 @@
 node_modules/
-.env
-.env.*
-!.env.example
-# Supabase CLI local files
-supabase/.branches/
-supabase/.temp/
-/docs/
-# Local environment variables and API secrets
+
 .env
 .env.*
 !.env.example
 !.env.*.example
-**/.env
-**/.env.*
-!**/.env.example
-!**/.env.*.example
+
+# Supabase CLI
+supabase/.branches/
+supabase/.temp/
+
+/docs/
