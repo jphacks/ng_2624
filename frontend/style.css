@@ -319,6 +319,86 @@ button { font: inherit; color: inherit; }
   overflow-wrap: anywhere;
 }
 .bubble.typing { color: var(--text-sub); }
+.bubble.is-error { background: #fde8e8; color: #8a1c1c; }
+
+/* AIが提案した商品カード */
+.msg:has(.product-list) { width: 94%; max-width: 94%; }
+.msg:has(.product-list) .msg-body { flex: 1; min-width: 0; }
+
+.product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.product-card {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--yellow);
+}
+
+.product-visual {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: #fff;
+  overflow: hidden;
+}
+.product-visual .goal-emoji { font-size: 36px; }
+.product-visual img { width: 100%; height: 100%; object-fit: contain; }
+
+.product-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.product-size {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--pink);
+  font-size: 11px;
+}
+.product-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.product-price { margin: 0; font-size: 13px; }
+.product-reason {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-sub);
+}
+
+.product-link {
+  margin-top: 2px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--link);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.product-sources {
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-sub);
+  overflow-wrap: anywhere;
+}
+.product-sources a { color: var(--link); }
 
 .composer { display: flex; gap: 8px; }
 .composer input {

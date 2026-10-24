@@ -2,10 +2,17 @@
   'use strict';
 
   const DATA = window.DATA;
+
+  // 試作サーバー（dev-server.ts）から開いたときは本物のAIを使う。
+  // index.html を直接開いたときは仮の返事を使う。
+  const USE_API = location.protocol === 'http:' || location.protocol === 'https:';
+
   const state = {
     points: DATA.points,
     tasks: DATA.tasks.map((t) => ({ ...t })),
-    messages: DATA.messages.slice(),
+    messages: USE_API
+      ? [{ from: 'ai', text: 'こんにちは！ほしいものや、すきなことを教えてね。' }]
+      : DATA.messages.slice(),
     replyIndex: 0,
   };
 
@@ -141,9 +148,85 @@
     const avatar = el('span', 'avatar', who.avatar);
     avatar.setAttribute('aria-hidden', 'true');
     const body = el('div', 'msg-body');
-    body.append(el('span', 'msg-name', who.name), el('p', 'bubble' + (msg.typing ? ' typing' : ''), msg.text));
+    const bubbleClass = 'bubble' + (msg.typing ? ' typing' : '') + (msg.error ? ' is-error' : '');
+    body.append(el('span', 'msg-name', who.name), el('p', bubbleClass, msg.text));
+    if (msg.products && msg.products.length) body.append(productListEl(msg.products, msg.sources || []));
     row.append(avatar, body);
     return row;
+  }
+
+  // ---- AIが提案した商品カード ----
+  const SIZE_LABEL = { small: '小', medium: '中', large: '大' };
+  const SIZE_ORDER = ['small', 'medium', 'large'];
+
+  // https のURLだけを使う（javascript: などのおかしなリンクを防ぐ）
+  function safeUrl(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' ? url.href : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function productCardEl(product) {
+    const card = el('article', 'product-card');
+
+    const visual = el('div', 'product-visual');
+    const image = safeUrl(product.imageUrl);
+    if (image) {
+      const img = el('img');
+      img.src = image;
+      img.alt = '';
+      visual.append(img);
+    } else {
+      visual.append(el('span', 'goal-emoji', '🎁'));
+    }
+
+    const info = el('div', 'product-info');
+    info.append(
+      el('span', 'product-size', SIZE_LABEL[product.size] || ''),
+      el('h4', 'product-name', product.name),
+    );
+    if (typeof product.priceJpy === 'number') {
+      info.append(el('p', 'product-price', '参考価格 ¥' + product.priceJpy.toLocaleString('ja-JP')));
+    }
+    if (product.recommendationReason) info.append(el('p', 'product-reason', product.recommendationReason));
+
+    const href = safeUrl(product.productUrl);
+    if (href) {
+      const link = el('a', 'product-link', '詳細（リンク）');
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      info.append(link);
+    }
+
+    card.append(visual, info);
+    return card;
+  }
+
+  function productListEl(products, sources) {
+    const wrap = el('div', 'product-list');
+    products
+      .slice()
+      .sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size))
+      .forEach((p) => wrap.append(productCardEl(p)));
+
+    const links = sources.map((s) => safeUrl(s.url)).filter(Boolean).slice(0, 5);
+    if (links.length) {
+      const note = el('p', 'product-sources', '参考にしたサイト：');
+      links.forEach((href, i) => {
+        if (i > 0) note.append(' / ');
+        const a = el('a', null, new URL(href).hostname.replace(/^www\./, ''));
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        note.append(a);
+      });
+      wrap.append(note);
+    }
+    return wrap;
   }
 
   function renderTalk() {
@@ -167,22 +250,64 @@
     $('messages').append(messageEl({ from: 'me', text }));
     input.value = '';
 
-    // 仮の返事。本番ではここでAIのAPIを呼ぶ
-    const typing = messageEl({ from: 'ai', text: '…', typing: true });
+    const typing = messageEl({ from: 'ai', text: USE_API ? '考え中…（少し時間がかかるよ）' : '…', typing: true });
     $('messages').append(typing);
     scrollToBottom();
 
     const submitBtn = e.currentTarget.querySelector('button');
     submitBtn.disabled = true;
-    setTimeout(() => {
-      const reply = DATA.mockReplies[state.replyIndex % DATA.mockReplies.length];
-      state.replyIndex += 1;
-      state.messages.push({ from: 'ai', text: reply });
-      typing.replaceWith(messageEl({ from: 'ai', text: reply }));
+
+    const finish = (msg) => {
+      if (!msg.error) state.messages.push(msg);
+      typing.replaceWith(messageEl(msg));
       submitBtn.disabled = false;
       scrollToBottom();
-    }, 900);
+    };
+
+    if (!USE_API) {
+      setTimeout(() => {
+        const reply = DATA.mockReplies[state.replyIndex % DATA.mockReplies.length];
+        state.replyIndex += 1;
+        finish({ from: 'ai', text: reply });
+      }, 900);
+      return;
+    }
+
+    // 失敗しても自動で送り直さない（docs/frontend-design.md の方針）
+    askAI(text)
+      .then((out) => finish({
+        from: 'ai',
+        text: out.reply,
+        products: out.action === 'PRODUCT' ? out.products : null,
+        sources: out.search ? out.search.sources : [],
+      }))
+      .catch((err) => finish({ from: 'ai', text: err.message, error: true }));
   });
+
+  async function askAI(message) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new Error((data && data.error) || 'AIの返事を受け取れませんでした');
+      return data;
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('時間がかかりすぎたので止めました。もう一度送ってみてね。');
+      if (err instanceof TypeError) throw new Error('サーバーにつながりませんでした。dev-server が動いているか確認してね。');
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // 画面を開き直したら、サーバー側の会話もリセットして表示とそろえる
+  if (USE_API) fetch('/api/reset', { method: 'POST' }).catch(() => {});
 
   // ---- 画面の切り替え（URLの #login / #home / #talk で管理） ----
   const SCREENS = ['login', 'home', 'talk'];
