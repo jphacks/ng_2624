@@ -10,10 +10,13 @@
 //   - 受け取った後（本番モード）：RESPONSE_MODELS で data の全項目がそろっているか確かめる
 // 仕様が変わったら、このファイルの ROUTES・REQUEST_RULES・RESPONSE_MODELS と、仮バックエンドの返す形を合わせて直す。
 //
-// モードは2つ：
+// モードは3つ：
 //   mock（仮モード） … ブラウザの中の仮バックエンドが、仕様と同じ形で返す。今はこちら。
 //   http（本番モード） … 本物のバックエンド（同じアドレスの /api/...）に送る。
 //                        URLの末尾に ?api=real を付けて開くと本番モードになる。
+//   supabase ........... AIの返事（ai.reply）だけ、BEの Supabase Edge Function「ai-reply」に送る。
+//                        ほかの操作は仮モードのまま。URLの末尾に ?api=supabase を付けて開く。
+//                        本番モードでも、AIの返事は ai-reply に送る。
 (function () {
   'use strict';
 
@@ -54,6 +57,7 @@
     NETWORK_ERROR: '通信できませんでした。つながっているか確認してください。',
     INVALID_RESPONSE: 'サーバーの返事が読み取れませんでした。',
     NOT_AVAILABLE: 'この機能はまだバックエンドにありません。',
+    NOT_CONFIGURED: 'AIにつなぐ準備がまだです。',
   };
 
   function errorMessage(err) {
@@ -107,6 +111,21 @@
   const GOOGLE_LOGIN_PATH = '/api/auth/google/start';
   // 親が子どもの端末に見せるQRのURL。後ろに招待トークンを付ける
   const PAIRING_URL_PREFIX = '/pairing#invitationToken=';
+
+  // ---------------------------------------------------------------
+  // AIの返事：BEの Supabase Edge Function「ai-reply」（supabase/functions/ai-reply）
+  //   送る：POST { message, conversationId? }（conversationId がなければBEが新しい会話を作る）
+  //   返る：{ conversationId, ...AIOutput }。失敗は { error: "文字列" }
+  // Gemini のキーは BE の中だけで使う。フロントが持つのは、公開用の anon キーとログイントークンだけ。
+  // FE-BE接続の仕様書とは返事の形がちがうので、ここだけ別に扱う（BE担当に確認中）。
+  // ---------------------------------------------------------------
+  const SUPABASE = {
+    url: '', // 例：'https://xxxx.supabase.co'（BE担当から受け取る）
+    anonKey: '', // 公開用の anon キー（publishable key）。service_role キーは絶対に入れない
+  };
+  const AI_REPLY_PATH = '/functions/v1/ai-reply';
+  // ai-reply が返すステータス → 画面の言葉を選ぶためのエラーコード（ないものは INTERNAL_ERROR）
+  const AI_REPLY_ERROR_CODE = { 400: 'INVALID_INPUT', 401: 'UNAUTHENTICATED', 404: 'NOT_FOUND', 405: 'INVALID_INPUT', 503: 'AI_UNAVAILABLE' };
 
   // 仕様のエラーコードと、そのときのHTTPステータス（Sample_db/api.ts の API_ERRORS と同じ）
   const ERROR_STATUS = {
@@ -189,6 +208,8 @@
     'pairing.respond': rule.obj({ pairingRequestId: idRule, decision: rule.oneOf('approved', 'rejected') }),
     'pairing.complete': rule.obj({ pairingRequestId: idRule }),
     'device.revoke': rule.obj({ deviceSessionId: idRule }),
+    // ↓ ai-reply 用（仕様書の外。BEの ai-reply が受け付ける形に合わせている）
+    'ai.reply': rule.obj({ message: rule.str(), conversationId: rule.nullable(idRule) }, ['message']),
   };
 
   function invalidInput(field) {
@@ -533,6 +554,87 @@
   }
 
   // ---------------------------------------------------------------
+  // AIの返事：BEの ai-reply へ送る
+  // ---------------------------------------------------------------
+
+  // ai-reply の返事 { conversationId, ...AIOutput } が、AIの返事の型どおりか
+  function validAiReply(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+    const { conversationId, ...output } = payload;
+    return matches(sId, conversationId) && matches(s.ref('AIOutput'), output);
+  }
+
+  function createAiReplyClient() {
+    // ログインしたユーザーのトークン（Supabase Auth）。
+    // ログインの入れ方はBE担当に確認中なので、今は「まだない」として止める。
+    const getAccessToken = async () => null;
+
+    const notConfigured = (what) => new ApiError(0, {
+      code: 'NOT_CONFIGURED', message: ERROR_HINT.NOT_CONFIGURED + '（' + what + 'の設定が必要です）',
+    });
+
+    // 接続先のURL。https だけ（手元で動かすSupabaseの localhost / 127.0.0.1 は http も可）
+    function endpoint() {
+      try {
+        const base = new URL(SUPABASE.url);
+        const local = base.hostname === 'localhost' || base.hostname === '127.0.0.1';
+        if (base.protocol !== 'https:' && !(local && base.protocol === 'http:')) return null;
+        if (base.username || base.password) return null;
+        return new URL(AI_REPLY_PATH, base).href;
+      } catch {
+        return null;
+      }
+    }
+
+    async function reply(input, signal) {
+      const url = endpoint();
+      if (!url || !SUPABASE.anonKey) throw notConfigured('接続先');
+      const token = await getAccessToken();
+      if (!token) throw notConfigured('ログイン');
+
+      const body = { message: input.message };
+      if (input.conversationId) body.conversationId = input.conversationId;
+
+      let response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + token,
+            apikey: SUPABASE.anonKey,
+          },
+          body: JSON.stringify(body),
+          // 別のアドレスなので Cookie は送らない。リダイレクトされたら失敗にする
+          credentials: 'omit', cache: 'no-store', redirect: 'error', signal,
+        });
+      } catch (err) {
+        if (err && err.name === 'AbortError') throw err;
+        throw new ApiError(0, { code: 'NETWORK_ERROR', message: ERROR_HINT.NETWORK_ERROR, stateMayHaveChanged: true });
+      }
+
+      const type = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+      const payload = type === 'application/json' ? await response.json().catch(() => null) : null;
+
+      if (!response.ok) {
+        const code = AI_REPLY_ERROR_CODE[response.status] || 'INTERNAL_ERROR';
+        const text = payload && typeof payload.error === 'string' && payload.error.trim()
+          ? payload.error.trim().slice(0, 200)
+          : ERROR_HINT[code];
+        // 500 は、発言だけ保存されたかもしれない（BEはAIの返事のあとに保存する）
+        throw new ApiError(response.status, { code, message: text, stateMayHaveChanged: response.status === 500 });
+      }
+      if (response.status !== 200 || !validAiReply(payload)) {
+        throw new ApiError(response.status, { code: 'INVALID_RESPONSE', message: ERROR_HINT.INVALID_RESPONSE, stateMayHaveChanged: true });
+      }
+      return payload;
+    }
+
+    return { reply };
+  }
+
+  // ---------------------------------------------------------------
   // 仮モード：ブラウザの中の仮バックエンド
   // 返す形は本番と同じ。バックエンドができたら使わなくなる。
   // ---------------------------------------------------------------
@@ -582,6 +684,16 @@
       const session = requireSession();
       const c = db.conversations.get(conversationId);
       if (!c || c.ownerRole !== session.role) fail(404, 'NOT_FOUND');
+      return c;
+    }
+
+    function newConversation(ownerRole, childId) {
+      const c = {
+        conversationId: newId('conv'), ownerRole, childId,
+        messages: [], products: [], selectedProductId: null, currentProposalId: null, latestAIOutput: null,
+        replyIndex: 0, createdAt: now(), updatedAt: now(),
+      };
+      db.conversations.set(c.conversationId, c);
       return c;
     }
 
@@ -666,12 +778,7 @@
         const session = requireSession();
         const childId = session.role === 'child' ? db.child.childId : input.childId;
         if (session.role === 'parent' && childId !== db.child.childId) fail(400, 'INVALID_INPUT', '子どもを選んでください。', 'childId');
-        const c = {
-          conversationId: newId('conv'), ownerRole: session.role, childId,
-          messages: [], products: [], selectedProductId: null, currentProposalId: null, latestAIOutput: null,
-          replyIndex: 0, createdAt: now(), updatedAt: now(),
-        };
-        db.conversations.set(c.conversationId, c);
+        const c = newConversation(session.role, childId);
         if (input.message) return handlers['conversation.message']({ conversationId: c.conversationId, message: input.message });
         return conversationView(c);
       },
@@ -768,6 +875,18 @@
         return proposalView(entry);
       },
 
+      // ↓ BEの ai-reply と同じ形で返す：{ conversationId, ...AIOutput }
+      //   conversationId がなければ新しい会話を作る。会話は上の conversation.* と共通なので、
+      //   このあとの商品選び・提案の下書きも仮モードでそのまま試せる。
+      async 'ai.reply'(input) {
+        const session = requireSession();
+        const c = input.conversationId
+          ? ownConversation(input.conversationId)
+          : newConversation(session.role, session.role === 'child' ? db.child.childId : null);
+        await handlers['conversation.message']({ conversationId: c.conversationId, message: input.message });
+        return { conversationId: c.conversationId, ...c.latestAIOutput };
+      },
+
       // ↓ 仕様にまだない操作（NOT_IN_CONTRACT）
       'proposals.received'() {
         requireSession('parent');
@@ -809,12 +928,17 @@
   // ---------------------------------------------------------------
   // 画面から使う関数
   // ---------------------------------------------------------------
-  const useHttp = location.protocol.startsWith('http') && new URLSearchParams(location.search).get('api') === 'real';
+  const apiParam = location.protocol.startsWith('http') ? new URLSearchParams(location.search).get('api') : null;
+  const useHttp = apiParam === 'real';
   const transport = useHttp ? createHttpTransport() : createMockTransport(window.DATA);
+  // AIの返事を本物の ai-reply に送るか（?api=supabase か、本番モードのとき）
+  const useSupabaseAi = useHttp || apiParam === 'supabase';
+  const aiReplyClient = createAiReplyClient();
 
   // どちらのモードでも、送る前に仕様どおりの形か確かめる（仕様にない操作は確認しない）
   async function call(operation, input, signal) {
     const body = NOT_IN_CONTRACT[operation] ? input : prepareInput(operation, input);
+    if (operation === 'ai.reply' && useSupabaseAi) return aiReplyClient.reply(body, signal);
     return transport.request(operation, body, signal);
   }
 
@@ -830,6 +954,8 @@
   // それぞれ BE が返した data をそのまま返す。失敗したら ApiError を投げる。
   window.API = {
     mode: transport.mode,
+    // AIの返事の送り先：'supabase'（BEの ai-reply）か 'mock'（仮の返事）
+    aiMode: useSupabaseAi ? 'supabase' : 'mock',
     ApiError,
     errorMessage,
     NOT_IN_CONTRACT,
@@ -902,6 +1028,16 @@
       selectProduct: (conversationId, selectedProductId) => call('conversation.select_product', { conversationId, selectedProductId }),
       /** → ConversationView（currentProposal に下書きが入る） */
       generateProposal: (conversationId) => call('conversation.generate_proposal', { conversationId }),
+    },
+
+    // AIの返事（BEの ai-reply。仕様書の外）
+    ai: {
+      /**
+       * 相談文を送って、AIの返事を受け取る → { conversationId, requestId, action, reply, search, products?, proposalDraft? }
+       * conversationId を省くと新しい会話になる。2回目からは返ってきた conversationId を渡す。
+       * 会話の履歴を取り直す窓口はまだないので、画面の履歴は画面側で覚えておく。
+       */
+      reply: (message, conversationId = null) => call('ai.reply', { message, conversationId }),
     },
 
     // 共有交渉（親子に見える会話）

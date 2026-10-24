@@ -109,9 +109,11 @@
   // ---- 初期画面 ----
   function renderStart() {
     hideError('start-error');
-    $('start-hint').textContent = API.mode === 'mock'
+    let hint = API.mode === 'mock'
       ? '試作版（仮のバックエンドで動作中）：同じブラウザで切り替えると、子どもが送った提案が親の画面に届きます'
       : 'バックエンドに接続しています';
+    if (API.mode === 'mock' && API.aiMode === 'supabase') hint += '（子どものトークのAIの返事だけ、本物のバックエンドにつないでいます）';
+    $('start-hint').textContent = hint;
   }
 
   async function startAs(role) {
@@ -425,7 +427,15 @@
   // 会話（ConversationView）を表示し、送信を受け付けるチャット欄
   //   getId: 表示中の会話ID
   //   greeting: 先頭に出すあいさつ（画面にだけ出す）
-  function createChat({ listId, formId, me, getId, greeting, onChoose, typingText }) {
+  //   send: 送信して、描き直す会話を受け取る（省略時は conversations.message）
+  //   needsId: 会話IDがないと送れないか（ai-reply は最初の送信で会話ができるので false）
+  //   recheck: 保存されたか分からないときに、会話を取り直して確かめるか
+  function createChat({
+    listId, formId, me, getId, greeting, onChoose, typingText,
+    send = (conversationId, text) => API.conversations.message(conversationId, text),
+    needsId = true,
+    recheck = true,
+  }) {
     const list = $(listId);
     const form = $(formId);
     const input = form.querySelector('input');
@@ -470,7 +480,7 @@
       e.preventDefault();
       const text = input.value.trim();
       const conversationId = getId();
-      if (!text || submitBtn.disabled || !conversationId) return;
+      if (!text || submitBtn.disabled || (needsId && !conversationId)) return;
 
       input.value = '';
       append({ from: 'me', text });
@@ -478,13 +488,13 @@
       submitBtn.disabled = true;
 
       try {
-        render(await API.conversations.message(conversationId, text));
+        render(await send(conversationId, text));
       } catch (err) {
         const errorMsg = { from: 'ai', text: API.errorMessage(err), error: true };
         typing.replaceWith(messageEl(errorMsg, me));
         let saved = false;
         // 保存されたか分からないときは、取得し直して確かめる（自動で送り直さない）
-        if (err.stateMayHaveChanged || err.code === 'AI_UNAVAILABLE') {
+        if (recheck && (err.stateMayHaveChanged || err.code === 'AI_UNAVAILABLE')) {
           try {
             const view = await API.conversations.get(conversationId);
             const mine = view.messages.filter((m) => m.sender === 'user');
@@ -507,6 +517,34 @@
   }
 
   // ---- 子どものトーク ----
+  // 送信は BE の ai-reply（API.ai.reply）を通し、返ってきたAIの返事だけを表示する。
+  // 会話の履歴を取り直す窓口はまだないので、やりとりは画面の中で覚えておく（再読み込みで消える）。
+  const childTalk = { messages: [], products: [], latestAIOutput: null };
+  let localMessageSeq = 0;
+
+  // 画面の控えを、チャット欄が描ける会話の形（ConversationView と同じ項目）にする
+  function childTalkView() {
+    return {
+      conversationId: state.childConversationId,
+      messages: childTalk.messages,
+      products: childTalk.products,
+      latestAIOutput: childTalk.latestAIOutput,
+    };
+  }
+
+  async function sendChildMessage(conversationId, text) {
+    const { conversationId: nextId, ...output } = await API.ai.reply(text, conversationId);
+    state.childConversationId = nextId; // 2回目からはこの会話IDで送る
+    const at = new Date().toISOString();
+    childTalk.messages.push(
+      { id: 'local-' + (++localMessageSeq), sender: 'user', content: text, createdAt: at },
+      { id: 'local-' + (++localMessageSeq), sender: 'assistant', content: output.reply, createdAt: at },
+    );
+    if (output.action === 'PRODUCT') childTalk.products = output.products;
+    childTalk.latestAIOutput = output;
+    return childTalkView();
+  }
+
   const childChat = createChat({
     listId: 'child-messages',
     formId: 'child-composer',
@@ -515,22 +553,14 @@
     greeting: () => DATA.childGreeting,
     onChoose: chooseProduct,
     typingText: () => '考え中…',
+    send: sendChildMessage,
+    needsId: false, // 最初の送信で、BEが会話を作る
+    recheck: false, // 履歴を取り直す窓口がまだない
   });
 
-  async function renderTalk(isCurrent) {
+  function renderTalk() {
     $('talk-points').textContent = state.points.toLocaleString('ja-JP');
-    try {
-      const view = state.childConversationId
-        ? await API.conversations.get(state.childConversationId)
-        : await API.conversations.create({});
-      if (!isCurrent()) return;
-      state.childConversationId = view.conversationId;
-      childChat.render(view);
-    } catch (err) {
-      if (!isCurrent()) return;
-      $('child-messages').replaceChildren();
-      childChat.append({ from: 'ai', text: API.errorMessage(err), error: true });
-    }
+    childChat.render(childTalkView());
   }
 
   // 「これにする」→ 商品を選ぶ → AIが提案の下書きを作る → 編集画面へ
