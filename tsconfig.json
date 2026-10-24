@@ -15,6 +15,7 @@
   "include": [
     "src/ai/**/*.ts",
     "src/connection/**/*.ts",
-    "src/server/**/*.ts"
+    "src/server/**/*.ts",
+    "demo/**/*.ts"
   ]
 }

@@ -30,7 +30,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  await db.update('child_settings',{child_id:'eq.'+child},{chore_preferences:['皿洗い']});
  await db.update('users',{id:'eq.'+child},{grade_level:4,grade_base_school_year:new Date().getFullYear()-(new Date().getMonth()<3?1:0)});
  let mode='product', aiCalls=0;
- const app=createApp(config,{db,ai:async input=>{parseAIInput(input);aiCalls++;assert.equal(input.mode,'consultation');assert.deepEqual(input.negotiationHistory,[]);assert.deepEqual(input.sharedConditions,[]);assert(input.profile);assert(input.profile.preferences.expectations.includes('皿洗い'));assert.equal(input.profile.gradeLevel,input.role==='child'?4:null);assert(!JSON.stringify(input.history).includes('親の秘密'));
+ const app=createApp(config,{db,ai:async input=>{parseAIInput(input);aiCalls++;assert.equal(input.mode,'consultation');assert.deepEqual(input.negotiationHistory,[]);assert.deepEqual(input.sharedConditions,[]);assert(input.profile);assert.deepEqual(input.profile.preferences.expectations,[]);assert.equal(input.profile.gradeLevel,input.role==='child'?4:null);assert(!JSON.stringify(input.history).includes('親の秘密'));
   return mode==='product'?{requestId:input.requestId,action:'PRODUCT',reply:'候補です',search:null,products:[{id:id(30),name:'商品',priceJpy:95,productUrl:'https://www.amazon.co.jp/dp/B000000000',priceCheckedAt:new Date().toISOString(),size:'small',description:'説明',recommendationReason:'候補',sourceUrls:['https://www.amazon.co.jp/dp/B000000000']}]}:{requestId:input.requestId,action:'PROPOSAL',reply:'下書きです',search:null,proposalDraft:{productId:id(30),target:'parent',persuasionText:'大切に使います',purchaseConditions:['お手伝いをする'],basedOn:input.currentProposal?{proposalId:input.currentProposal.id,version:input.currentProposal.version}:null}};
  },enrich:async p=>({...p,imageUrl:null}),image:async()=>null,qr:async()=> 'data:image/png;base64,test'});
  async function call(path:string,method='GET',body?:unknown,role='child',csrf='csrf',origin=config.origin){const tok=role==='parent'?tokenParent:role==='stranger'?tokenStranger:tokenChild;const r=await app(new Request(config.origin+'/api'+path,{method,headers:{cookie:'wb_local_session='+tok,origin,'x-csrf-token':csrf,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}));return {status:r.status,...await r.json()};}
@@ -38,6 +38,8 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   assert.equal((await call('/profile','PATCH',{displayName:'bad'},'parent','wrong')).status,403);
   assert.equal((await call('/profile','PATCH',{displayName:'bad'},'parent','csrf','https://evil.example')).status,403);
   assert.equal((await call('/children','GET')).status,403);
+  assert.equal((await call('/demo/state','GET',undefined,'parent')).status,404);
+  assert.equal((await call('/demo/login','POST',{role:'child'},'parent')).status,404);
   assert.equal((await call('/dashboard?childId='+child,'GET',undefined,'stranger')).status,403);
  });
  await t.test('chore proposal and pre-agreed reward survives completion; no duplicate credit',async()=>{
@@ -53,6 +55,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   await pg.query('insert into public.messages(conversation_id,sender,content) values($1,\'user\',\'親の秘密\')',[pc.data.conversationId]);
   const c=await call('/conversations','POST',{});assert.equal(c.status,201);conversation=c.data.conversationId;
   assert.equal((await call('/conversations/'+conversation,'GET',undefined,'parent')).status,404);
+  assert.equal((await call('/conversations/'+conversation+'/start','POST',{})).status,200);
   const r=await call('/conversations/'+conversation+'/messages','POST',{message:'商品がほしい',role:'parent',history:[{content:'other'}]});assert.equal(r.status,200);assert.deepEqual(r.data.messages.map((x:any)=>x.sender),['user','assistant']);assert.equal(aiCalls,1);
   assert.equal((await call('/conversations/'+conversation+'/selected-product','PATCH',{selectedProductId:id(30)})).status,200);
   mode='draft';const d=await call('/conversations/'+conversation+'/proposal-drafts','POST',{});assert.equal(d.status,200);proposal=d.data.currentProposal.id;
@@ -67,8 +70,8 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   for(let i=0;i<2;i++)assert.equal((await call('/goals/'+goal.id+'/purchase','POST',{},'parent')).status,200);
   const after=await call('/dashboard');assert.equal(after.data.balanceYen,5);assert.equal(after.data.lifetimeEarnedYen,100);assert.equal(after.data.goals.length,0);
  });
- await t.test('consulting a received proposal opens only the current user private conversation',async()=>{
-  const c=await call('/conversations','POST',{proposalId:proposal},'parent');assert.equal(c.status,201);assert.equal(c.data.messages.length,0);assert.equal(c.data.currentProposal.id,proposal);assert.equal((await call('/conversations/'+c.data.conversationId)).status,404);
+ await t.test('an agreed proposal cannot create a new private revision conversation',async()=>{
+  const c=await call('/conversations','POST',{proposalId:proposal},'parent');assert.equal(c.status,409);assert.equal(c.error.code,'INVALID_STATE');
  });
  await t.test('invalid child settings fail before creating an auth account',async()=>{
   const result=await call('/children','POST',{displayName:'新しい子',birthDate:'2018-04-01',rewardGuidelines:{smallJpy:1000,mediumJpy:100,largeJpy:10000}},'parent');
@@ -88,6 +91,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   let captured:any;
   const searchApp=createApp(config,{db,ai:async input=>{captured=parseAIInput(input);return {requestId:input.requestId,action:'HEARING',reply:'候補がありません',search:null};},enrich:async p=>p,image:async()=>null,qr:async()=>''});
   const c=await call('/conversations','POST',{childId:child},'parent');
+  await call('/conversations/'+c.data.conversationId+'/start','POST',{},'parent');
   const response=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'Switch スプラトゥーン'})}));
   assert.equal(response.status,200);assert.equal(captured.role,'parent');assert.equal(captured.searchQuery,'Switch スプラトゥーン');assert.equal(captured.childContext.gradeLevel,4);assert.ok(captured.childContext.age<captured.profile.age);
  });

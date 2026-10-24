@@ -4,9 +4,10 @@
   "description": "コード保管用に作成した仮リポジトリです",
   "main": "index.js",
   "scripts": {
-    "test": "node --test src/ai/conversation.test.ts src/connection/connection.test.ts src/connection/http.test.ts src/server/*.test.ts",
+    "test": "node --test src/ai/conversation.test.ts src/connection/connection.test.ts src/connection/http.test.ts src/server/*.test.ts demo/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "start": "node --env-file-if-exists=.env src/server/main.ts"
+    "start": "node --env-file-if-exists=.env src/server/main.ts",
+    "demo": "node --env-file-if-exists=.env demo/main.ts"
   },
   "repository": {
     "type": "git",

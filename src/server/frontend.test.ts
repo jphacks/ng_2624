@@ -49,7 +49,7 @@ test('unsaved proposal edits prevent sending',async()=>{
 });
 
 test('a hearing response during proposal generation remains in chat even with an old draft',async()=>{
- const conversation={conversationId:'chat',messages:[],products:[],currentProposal:{id:'old'},latestAIOutput:{action:'HEARING',reply:'条件を確認してください'}};
+ const conversation={conversationId:'chat',mode:'consultation',phase:'consultation',canMessage:true,messages:[],products:[],currentProposal:{id:'old'},latestAIOutput:{action:'HEARING',reply:'条件を確認してください'}};
  const ui=await frontend(async path=>path.startsWith('/conversations/chat')?conversation:basic(path));
  ui.state.chat=conversation;ui.location.hash='#conversation/chat';
  await ui.action('generate-proposal');
@@ -68,7 +68,7 @@ test('parent and child receive different chat introduction and settings links',a
  const ui=await frontend(async path=>path==='/auth/session'?childSession:path==='/conversations/chat'?{messages:[],products:[]}:basic(path));
  await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/ぽぽだよ/);
  assert.match(ui.nodes['#navigation'].innerHTML,/じぶんの設定/);assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/子ども一覧/);
- ui.state.session=session;await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/保護者の方/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/ぽぽだよ/);
+ ui.state.session=session;await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/お子さんの目標/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/ぽぽだよ/);
 });
 
 
@@ -80,4 +80,29 @@ test('a successful mutation after navigation reports completion without replacin
  await ui.go('#children');finish({});await saving;
  assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
  assert.match(ui.nodes['#notice'].textContent,/前の画面の操作が完了/);
+});
+
+
+test('composer follows server phase and introduction stays before all conversation messages',async()=>{
+ const thread:any={conversationId:'chat',mode:'consultation',phase:'not_started',canMessage:false,messages:[{sender:'assistant',content:'以前の返答'}],products:[]};
+ const ui=await frontend(async path=>path==='/conversations/chat'?thread:basic(path));
+ await ui.chat('chat');let html=ui.nodes['#content'].innerHTML;
+ assert.doesNotMatch(html,/data-form="message"/);assert.match(html,/個別相談を開始する/);
+ assert.ok(html.indexOf('ぽぽです。')<html.indexOf('以前の返答'));assert.match(html,/message-avatar/);
+ thread.phase='consultation';thread.canMessage=true;await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
+ for(const phase of ['awaiting_response','closed']){thread.phase=phase;thread.canMessage=false;await ui.chat('chat');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"|data-form="search-products"/);}
+});
+
+test('shared chat uses negotiation endpoints and exposes only the active shared composer',async()=>{
+ const thread:any={mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,messages:[{sender:'parent',own:false,content:'共有された条件'}],products:[],currentProposal:{id:'proposal'}};
+ const calls:string[]=[];
+ const ui=await frontend(async path=>{if(path.startsWith('/negotiations/shared')){calls.push(path);return thread;}return basic(path);});
+ ui.state.chat=thread;
+ await ui.submit('message','',{message:'条件に賛成します'});
+ assert.equal(calls[0],'/negotiations/shared/messages');
+ assert.match(ui.nodes['#content'].innerHTML,/親子に公開するメッセージ/);assert.match(ui.nodes['#content'].innerHTML,/共有交渉中/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="search-products"/);
+ thread.phase='closed';thread.canMessage=false;
+ await ui.submit('message','',{message:'テスト応答の再表示'});
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"/);
 });

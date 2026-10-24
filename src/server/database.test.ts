@@ -25,7 +25,7 @@ test('database migrations, private proposals, chores, purchases and pairing', as
  insert into public.families(id,name,created_by) values('${family}','家族','${parent}'),('${otherFamily}','別家族','${stranger}');
  insert into public.family_members values('${family}','${parent}','parent',now()),('${family}','${child}','child',now()),('${otherFamily}','${stranger}','parent',now());
  insert into public.products(id,name,price_jpy,product_url) values('${product}','本',95,'https://example.com/book');
- insert into public.conversations(id,user_id,child_id,selected_product_id) values('${conv}','${child}','${child}','${product}');`);
+ insert into public.conversations(id,user_id,child_id,selected_product_id,started_at) values('${conv}','${child}','${child}','${product}',now());`);
  await t.test('child registration is atomic, idempotent and family scoped',async()=>{
   const newChild=id(4); await db.exec(`insert into auth.users(id) values('${newChild}')`);
   const first=await rpc('wb_create_child',[parent,newChild,'次の子','2017-01-01','unspecified',4,2026]);
@@ -71,7 +71,7 @@ test('database migrations, private proposals, chores, purchases and pairing', as
  });
  await t.test('parent proposal and child revision keep source conversations private; price snapshot, slot and balance checks',async()=>{
   const parentConv=id(21);
-  await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id) values('${parentConv}','${parent}','${child}','${product}');`);
+  await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id,started_at) values('${parentConv}','${parent}','${child}','${product}',now());`);
   const parentDraft=await rpc('wb_save_proposal',[parent,parentConv,product,'親から提案',[], 'small']);
   await rpc('wb_send_proposal',[parent,parentDraft.id,parentDraft.version,null]);
   await rpc('wb_review_proposal',[child,parentDraft.id,parentDraft.version,'revision_requested','条件を変えたい']);
@@ -84,14 +84,15 @@ test('database migrations, private proposals, chores, purchases and pairing', as
   const goal=(await db.query('select * from goals where proposal_id=$1',[revision.id])).rows[0];
   assert.equal(goal.target_amount_yen,95);
   await assert.rejects(rpc('wb_purchase_goal',[parent,goal.id]),/Insufficient balance/);
-  const other=await rpc('wb_save_proposal',[child,conv,product,'もう一つ',[], 'small']);
+  const otherConv=id(23);await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id,started_at) values('${otherConv}','${child}','${child}','${product}',now())`);
+  const other=await rpc('wb_save_proposal',[child,otherConv,product,'もう一つ',[], 'small']);
   await rpc('wb_send_proposal',[child,other.id,other.version,parent]);
   await assert.rejects(rpc('wb_review_proposal',[parent,other.id,other.version,'approved',null]),/active goal/);
   assert.equal((await db.query('select count(*)::integer as count from proposal_approvals where proposal_id=$1',[other.id])).rows[0].count,1);
  });
  await t.test('AI persistence has ownership, lease, atomic failure and exactly-once finish checks',async()=>{
   const aiConv=id(22),lock=id(40),wrong=id(41),candidate=id(31);
-  await db.exec(`insert into conversations(id,user_id,child_id) values('${aiConv}','${child}','${child}')`);
+  await db.exec(`insert into conversations(id,user_id,child_id,started_at) values('${aiConv}','${child}','${child}',now())`);
   await assert.rejects(rpc('wb_begin_ai',[parent,aiConv,lock]),/access denied/);
   await rpc('wb_begin_ai',[child,aiConv,lock]);
   await assert.rejects(rpc('wb_begin_ai',[child,aiConv,wrong]),/busy/);
