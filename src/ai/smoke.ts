@@ -28,14 +28,14 @@ try {
     const selected = found.products.find(p => p.priceJpy !== null);
     expect(selected, '価格の根拠がある候補を取得できませんでした。');
     const draftInput: AIInput = { ...searchInput, requestId: 'smoke-proposal', products: found.products,
-        selectedProductId: selected.id, message: 'この商品がいいです。',
+        selectedProductId: selected.id, message: null,
         sharedConditions: [...searchInput.sharedConditions, { id: 'smoke-conditions', sourceUserId: 'demo-child', targetUserId: 'demo-parent',
             content: '選択商品について親に送る提案文を作ってください。今週の平日5日のうち4日宿題を提出することが条件。期限は2026年10月30日。1日休んでも大丈夫としてください。',
             approvedAt: searchInput.now }] };
     const draft = await run(draftInput);
     expect(draft.action === 'PROPOSAL', '商品選択後に提案下書きを取得できませんでした。');
     expect(draft.proposalDraft.target === 'parent', '提案先が正しくありません。');
-    const revision = await run({ ...draftInput, requestId: 'smoke-revision', role: 'parent',
+    const revision = await run({ ...draftInput, requestId: 'smoke-revision', role: 'parent', mode: 'negotiation', history: [], profile: null,
         message: '4日の条件を3日に変えてください。期限は10月30日のままで、子供に返す修正提案を作ってください。',
         negotiationResult: { proposalId: 'smoke-proposal-id', version: 1, decision: 'revision_requested',
             reason: '宿題を提出する条件を4日から3日へ変更したい。期限は10月30日のままで子供向けの修正提案を作ってほしい。' },

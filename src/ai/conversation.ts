@@ -2,7 +2,7 @@ import type { AIInput, AIOutput, ProposalDraft } from '../../Sample_db/types.ts'
 import { ConversationError, toConversationError } from './errors.ts';
 import { generateGeminiReply } from './gemini.ts';
 import type { ReplyGenerator } from './gemini.ts';
-import { buildConversationRequest, negotiationContext } from './prompt.ts';
+import { buildConversationRequest } from './prompt.ts';
 import { parseDecision } from './protocol.ts';
 import { searchProducts } from './search.ts';
 import { GOAL_SIZES, withinGuideline } from './rewards.ts';
@@ -22,6 +22,12 @@ export async function createReply(
 ): Promise<AIOutput> {
     try {
         const input = parseAIInput(value);
+        // ボタンによるYesへの応答ではモデルを呼ばず、交渉を開始・改訂しない。
+        // 同一提案・版への子供の送信同意と親の承認、合意確定・目標登録はBEが扱う。
+        if (input.message === null && input.negotiationResult?.decision === 'approved') {
+            return { requestId: input.requestId, action: 'HEARING', search: null,
+                reply: 'この提案への承認が記録されています。提案の状態を確認してください。' };
+        }
         const generate = dependencies.generate ?? generateGeminiReply;
         const generated = await generate(buildConversationRequest(input));
         if (typeof generated.text !== 'string' || !generated.text.trim()) {
@@ -29,17 +35,18 @@ export async function createReply(
         }
         const decision = parseDecision(generated.text);
         const base = { requestId: input.requestId, reply: decision.reply, search: null };
-        // モデルが段階指定を無視しても、非公開コンテキストから検索・提案へ進ませない。
-        if (input.mode === 'consultation') {
-            return { ...base, action: 'HEARING', reply: decision.action === 'HEARING' ? decision.reply
-                : '商品検索や相手への提案に使う内容を確認し、共有を許可してから交渉へ進んでください。' };
+        // 個別相談で検索・初回提案まで行うが、モデルの判断で共有交渉へ移行しない。
+        if (input.mode === 'consultation' && decision.action === 'NEGOTIATION') {
+            return { ...base, action: 'HEARING', reply: 'まず提案内容を確認してください。親への送信と回答の後、必要に応じて共有交渉へ進みます。' };
         }
         if (decision.action === 'HEARING') return { ...base, action: 'HEARING' };
         if (decision.action === 'SEARCH') {
             if (Object.values(input.rewardGuidelines).some(amount => amount === null)) {
                 return { ...base, action: 'HEARING', reply: '保護者の設定で、大中小それぞれの目安金額を決めてもらえますか？' };
             }
-            const found = await searchProducts(decision.searchQuery!, negotiationContext(input), generate, dependencies.createId ?? (() => crypto.randomUUID()));
+            const found = await searchProducts(decision.searchQuery!, {
+                now: input.now, constraints: input.constraints, rewardGuidelines: input.rewardGuidelines,
+            }, generate, dependencies.createId ?? (() => crypto.randomUUID()));
             const labels = { small: '小', medium: '中', large: '大' };
             const missing = GOAL_SIZES.filter(size => !found.products.some(product => product.size === size));
             const consultation = missing.length
@@ -51,7 +58,9 @@ export async function createReply(
         const current = input.currentProposal;
         const productId = input.selectedProductId ?? current?.productId;
         const product = input.products.find(product => product.id === productId);
-        const blocked = (reply: string): AIOutput => ({ ...base, reply, action: 'NEGOTIATION', proposalDraft: null });
+        const blocked = (reply: string): AIOutput => input.mode === 'consultation'
+            ? { ...base, reply, action: 'HEARING' }
+            : { ...base, reply, action: 'NEGOTIATION', proposalDraft: null };
         if (current && ['agreed', 'superseded'].includes(current.status)) {
             return blocked('この提案は確定済み、または更新済みです。最新の提案を確認してから相談を続けてください。');
         }
@@ -70,7 +79,7 @@ export async function createReply(
             persuasionText: decision.persuasionText!, purchaseConditions: decision.purchaseConditions,
             basedOn: current ? { proposalId: current.id, version: current.version } : null,
         };
-        return { ...base, action: current ? 'NEGOTIATION' : 'PROPOSAL', proposalDraft };
+        return { ...base, action: input.mode === 'negotiation' && current ? 'NEGOTIATION' : 'PROPOSAL', proposalDraft };
     } catch (error) { throw toConversationError(error); }
 }
 

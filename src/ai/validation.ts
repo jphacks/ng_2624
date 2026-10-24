@@ -1,4 +1,4 @@
-import type { AIInput, AIUserProfile, ChatMessage, ProductCandidate, Proposal, SharedCondition, NegotiationResult } from '../../Sample_db/types.ts';
+import type { AIInput, AIUserProfile, ChatMessage, NegotiationMessage, ProductCandidate, Proposal, SharedCondition, NegotiationResult } from '../../Sample_db/types.ts';
 import { ConversationError } from './errors.ts';
 
 function invalid(field: string): never {
@@ -63,6 +63,15 @@ function chatMessage(value: unknown, field: string): ChatMessage {
     };
 }
 
+function negotiationMessage(value: unknown, field: string): NegotiationMessage {
+    const item = record(value, field);
+    if (item.sender !== 'parent' && item.sender !== 'child' && item.sender !== 'assistant') invalid(`${field}.sender`);
+    return {
+        id: text(item.id, `${field}.id`, 128), sender: item.sender,
+        content: text(item.content, `${field}.content`), createdAt: date(item.createdAt, `${field}.createdAt`),
+    };
+}
+
 function profile(value: unknown, field: string): AIUserProfile | null {
     if (value === null) return null;
     const item = record(value, field);
@@ -101,7 +110,7 @@ function proposal(value: unknown): Proposal | null {
     if (typeof item.version !== 'number' || !Number.isSafeInteger(item.version) || item.version < 1) invalid('currentProposal.version');
     if (!['draft', 'pending', 'rejected', 'agreed', 'superseded'].includes(item.status as string)) invalid('currentProposal.status');
     return {
-        id: text(item.id, 'currentProposal.id', 128), negotiationId: text(item.negotiationId, 'currentProposal.negotiationId', 128),
+        id: text(item.id, 'currentProposal.id', 128), negotiationId: item.negotiationId === null ? null : text(item.negotiationId, 'currentProposal.negotiationId', 128),
         productId: text(item.productId, 'currentProposal.productId', 128), version: item.version,
         persuasionText: text(item.persuasionText, 'currentProposal.persuasionText'),
         purchaseConditions: list(item.purchaseConditions, 'currentProposal.purchaseConditions', (v, f) => text(v, f, 500), 12),
@@ -140,9 +149,10 @@ export function parseAIInput(value: unknown): AIInput {
     const guidelines = record(input.rewardGuidelines, 'rewardGuidelines');
     const result: AIInput = {
         requestId: text(input.requestId, 'requestId', 128), now: date(input.now, 'now'),
-        role: input.role, message: text(input.message, 'message'),
+        role: input.role, message: input.message === null ? null : text(input.message, 'message'),
         mode: input.mode,
         history: list(input.history, 'history', chatMessage),
+        negotiationHistory: list(input.negotiationHistory, 'negotiationHistory', negotiationMessage),
         profile: profile(input.profile, 'profile'),
         sharedConditions: list(input.sharedConditions, 'sharedConditions', sharedCondition),
         constraints: {
@@ -159,6 +169,11 @@ export function parseAIInput(value: unknown): AIInput {
         currentProposal: proposal(input.currentProposal),
         negotiationResult: negotiationResult(input.negotiationResult),
     };
+    if (result.message === null && !result.selectedProductId && !result.currentProposal && !result.negotiationResult) invalid('message');
+    if (result.mode === 'consultation' && result.negotiationHistory.length) invalid('negotiationHistory');
+    if (new Set(result.negotiationHistory.map(item => item.id)).size !== result.negotiationHistory.length) invalid('negotiationHistory.id');
+    if (result.negotiationHistory.some((item, index, items) => Date.parse(item.createdAt) > Date.parse(result.now)
+        || (index > 0 && Date.parse(item.createdAt) < Date.parse(items[index - 1].createdAt)))) invalid('negotiationHistory.createdAt');
     const ids = new Set(result.products.map(p => p.id));
     if (ids.size !== result.products.length) invalid('products.id');
     if (result.selectedProductId !== null && !ids.has(result.selectedProductId)) invalid('selectedProductId');

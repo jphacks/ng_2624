@@ -1,5 +1,5 @@
 
-// Shared contract v0.5: import into frontend, AI module, and Edge Functions.
+// Shared contract v0.7: import into frontend, AI module, and Edge Functions.
 
 export type UserRole = 'parent' | 'child';
 export type Gender = 'male' | 'female' | 'other' | null;
@@ -26,6 +26,15 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+/** 同じ交渉の参加者全員に公開された履歴。個別相談の履歴から自動転記しない。 */
+export interface NegotiationMessage {
+  id: string;
+  /** BEが投稿者の認証情報から確定する。assistantも公開されたAIの返答だけ。 */
+  sender: UserRole | 'assistant';
+  content: string;
+  createdAt: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -45,7 +54,8 @@ export interface SharedCondition {
 
 export interface Proposal {
   id: string;
-  negotiationId: string;
+  /** 初回提案ではnull。保護者のNoで共有交渉を作成した後にBEが紐付ける。 */
+  negotiationId: string | null;
   productId: string;
   version: number;
   persuasionText: string;
@@ -91,17 +101,29 @@ export interface AIInput {
   requestId: string;
   now: string;
   role: UserRole;
-  /** BEが選択する。発言やモデルの判断から共有許可を推測しない。 */
+  /** BEが投稿先と参加権限から確定する。発言本文からモードや共有許可を推測しない。
+   * consultation: conversationIdで指定した本人専用会話。
+   * negotiation: negotiationIdで指定した親子共通の会話。
+   */
   mode: 'consultation' | 'negotiation';
-  /** 本人の非公開発言。consultationでのみモデルへ渡す。 */
-  message: string;
+  /** 今回の発言。個別相談では非公開、交渉への投稿では参加者全員に公開。
+   * BEは公開範囲を明示した投稿先を検証し、非公開発言を交渉へ流用しない。
+   */
+  /** ボタン操作ではnull。対象の選択商品・提案・回答結果をBEが別項目に設定する。 */
+  message: string | null;
   /** 本人の履歴のみ。今回のmessageを含めない。所有者はBEが検証する。 */
   history: ChatMessage[];
+  /** 今回のmessageを含めない共有履歴（時系列順、最大40件）。個別相談では[]。
+   * 交渉ではhistory・profileを使わず、今回のmessageとこの履歴を使う。
+   */
+  negotiationHistory: NegotiationMessage[];
   /** 本人の非公開プロフィール。consultationでのみ使用する。 */
   profile: AIUserProfile | null;
-  /** BEが本人・共有先・許可の有効性を検証済みの情報のみ。 */
+  /** 個別相談から持ち込む場合、本人が公開用の要約を確認・編集して許可した内容のみ。
+   * モード切替だけでは履歴やプロフィールを公開しない。許可の有効性はBEが検証する。
+   */
   sharedConditions: SharedCondition[];
-  /** 以下はBEが共有範囲を検証済みの情報。未共有の発言から補完しない。 */
+  /** BEが今回の閲覧者への公開範囲を検証済みの情報。親の設定値をAIの判断で変更しない。 */
   constraints: PurchaseConstraints;
   /** BEが保護者の設定と共有範囲を検証済み。許容範囲は各金額の80〜120%。 */
   rewardGuidelines: RewardGuidelines;
@@ -120,9 +142,12 @@ export type NegotiationResult = {
   | { decision: 'rejected' | 'revision_requested'; reason: string }
 );
 
-/** 検索・提案に渡せる項目だけを列挙。非公開コンテキストを持たせない。 */
+/** 公開検索に必要な条件だけ。発言・履歴・プロフィールを直接持たせない。 */
+export type ProductSearchContext = Pick<AIInput, 'now' | 'constraints' | 'rewardGuidelines'>;
+
+/** 共有交渉の判断に渡す項目。個別相談の履歴・プロフィールを持たせない。 */
 export type NegotiationContext = Pick<AIInput,
-  'role' | 'now' | 'sharedConditions' | 'constraints' | 'rewardGuidelines' | 'products'
+  'role' | 'now' | 'message' | 'negotiationHistory' | 'sharedConditions' | 'constraints' | 'rewardGuidelines' | 'products'
   | 'selectedProductId' | 'currentProposal' | 'negotiationResult'>;
 
 export interface ProposalDraft {
@@ -135,6 +160,9 @@ export interface ProposalDraft {
 
 interface AIOutputBase {
   requestId: string;
+  /** 商品候補・提案下書きを含む出力全体は、consultationでは本人だけ、negotiationでは参加者全員に表示・保存する。
+   * 出力の公開範囲はBEが呼び出し元のmodeから確定する。
+   */
   reply: string;
   /** 候補が0件でも検索の出典表示データを保持する。 */
   search: SearchMetadata | null;
