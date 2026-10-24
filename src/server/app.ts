@@ -63,8 +63,11 @@ export function createApp(config: Config, dep: Dependencies) {
     const product = mapProduct(await one('products', { id: eq(p.product_id) }));
     const responses = await db.list('proposal_approvals', { proposal_id: eq(p.id), order: 'decided_at.desc' });
     const answer = responses.find(x => x.user_id !== p.proposed_by);
-    return { proposal: mapProposal(p), product, negotiationResult: answer ? { proposalId: p.id, version: p.version, decision: answer.decision, reason: answer.comment || null } : null,
-      canEdit: p.proposed_by === user.id && p.status === 'draft', canRespond: p.proposed_by !== user.id && p.status === 'pending' && !responses.some(x => x.user_id === user.id) };
+    const negotiation = p.negotiation_id ? await one('negotiations', { id: eq(p.negotiation_id) }) : p.based_on_proposal_id ? await one('negotiations', { id: eq((await one('proposals', { id: eq(p.based_on_proposal_id) })).negotiation_id) }) : null;
+    const latest = negotiation ? await one('proposals', { negotiation_id: eq(negotiation.id), status: 'neq.draft', order: 'version.desc' }, false) : null;
+    const canEdit = p.proposed_by === user.id && p.status === 'draft' && (negotiation ? negotiation.status === 'revision_requested' && latest?.id === p.based_on_proposal_id && latest?.version === p.based_on_version : await db.rpc('wb_consultation_phase', { p_actor_id: user.id, p_conversation_id: p.conversation_id }) === 'consultation');
+    return { proposal: mapProposal(p), product, canConsult: !!negotiation && negotiation.status === 'revision_requested' && latest?.id === p.id, negotiationId: negotiation?.id || null, negotiationStatus: negotiation?.status || null, negotiationResult: answer ? { proposalId: p.id, version: p.version, decision: answer.decision, reason: answer.comment || null } : null,
+      canEdit, canRespond: p.proposed_by !== user.id && p.status === 'pending' && negotiation?.status === 'awaiting_approval' && latest?.id === p.id && !responses.some(x => x.user_id === user.id) };
   }
   async function currentProposal(user: Row, c: Row): Promise<Row | null> {
     const own = await one('proposals', { conversation_id: eq(c.id), proposed_by: eq(user.id), order: 'created_at.desc,id.desc' }, false);
@@ -74,7 +77,8 @@ export function createApp(config: Config, dep: Dependencies) {
   async function chatView(user: Row, c: Row): Promise<Row> {
     const messages = await db.list('messages', { conversation_id: eq(c.id), order: 'sequence_no.desc', limit: '100' });
     const p = await currentProposal(user, c);
-    return { conversationId: c.id, childId: c.child_id, products: c.products, selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, latestAIOutput: c.latest_ai_output, messages: messages.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })) };
+    const phase = await db.rpc('wb_consultation_phase', { p_actor_id: user.id, p_conversation_id: c.id });
+    return { mode: 'consultation', phase, canMessage: phase === 'consultation', negotiationId: p?.negotiation_id || null, conversationId: c.id, childId: c.child_id, products: c.products, selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, latestAIOutput: c.latest_ai_output, messages: messages.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })) };
   }
   async function proposalsFor(user: Row, childId: string): Promise<Row[]> {
     const n = await db.list('negotiations', { child_id: eq(childId), ...(user.role === 'parent' ? { parent_id: eq(user.id) } : {}), order: 'created_at.desc', limit: '100' });
@@ -83,6 +87,53 @@ export function createApp(config: Config, dep: Dependencies) {
     const drafts = chats.length ? await db.list('proposals', { conversation_id: listOf(chats.map(x => x.id)), proposed_by: eq(user.id), status: 'eq.draft', order: 'created_at.desc', limit: '100' }) : [];
     const child = await one('users', { id: eq(childId) });
     return Promise.all([...drafts, ...list].map(async p => ({ ...await proposalView(user, p), childId, childDisplayName: child.display_name })));
+  }
+  async function accessibleNegotiation(user: Row, id: string): Promise<Row> {
+    const n = await one('negotiations', { id: eq(uuid(id)) });
+    assert(n.parent_id && [n.parent_id,n.child_id].includes(user.id), 404, 'NOT_FOUND', '交渉が見つかりません。');
+    await family(user,n.child_id); return n;
+  }
+  async function sharedProposal(n: Row): Promise<Row> {
+    return one('proposals', { negotiation_id: eq(n.id), status: 'neq.draft', order: 'version.desc' });
+  }
+  async function negotiationView(user: Row, n: Row): Promise<Row> {
+    const p = await sharedProposal(n);
+    const messages = await db.list('negotiation_messages', { negotiation_id: eq(n.id), order: 'sequence_no.desc', limit: '100' });
+    const draft = await one('proposals', { proposed_by: eq(user.id), based_on_proposal_id: eq(p.id), status: 'eq.draft', order: 'created_at.desc' }, false);
+    const canMessage = n.status === 'revision_requested' && p.status === 'rejected';
+    return { mode: 'negotiation', negotiationId: n.id, childId: n.child_id, phase: canMessage ? 'negotiation' : n.status === 'awaiting_approval' ? 'awaiting_response' : 'closed', canMessage,
+      products: n.products.length ? n.products : [mapProduct(await one('products', { id: eq(p.product_id) }))], selectedProductId: n.products.length ? n.selected_product_id : p.product_id,
+      currentProposal: mapProposal(p), draftProposal: canMessage && draft?.based_on_version === p.version ? mapProposal(draft) : null,
+      proposalView: await proposalView(user,p), latestAIOutput: n.latest_ai_output,
+      messages: messages.reverse().map(m => ({ id: m.id, sender: m.sender === 'user' ? m.user_id === n.child_id ? 'child' : 'parent' : m.sender, own: m.user_id === user.id, content: m.content, createdAt: m.created_at })) };
+  }
+  async function enrichOutput(output: AIOutput): Promise<AIOutput> {
+    if (output.action !== 'PRODUCT') return output;
+    const products = (await Promise.all(output.products.map(dep.enrich))).filter((p): p is ProductCandidate => p !== null);
+    return products.length ? { ...output, products } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: '商品ページを確認できませんでした。検索条件を見直して、もう一度探してください。' };
+  }
+  async function runNegotiationAI(user: Row, id: string, message: string | null) {
+    rate(`ai:${user.id}`,20,600000);
+    assert(config.geminiKey,503,'SETUP_REQUIRED','AIの接続設定がまだ完了していません。');
+    const lockId=randomUUID();
+    const n=await db.rpc('wb_begin_negotiation_ai',{p_actor_id:user.id,p_negotiation_id:uuid(id),p_lock_id:lockId});
+    try {
+      const p=await sharedProposal(n), view=await proposalView(user,p), configChild=await settings(n.child_id);
+      const history=await db.list('negotiation_messages',{negotiation_id:eq(n.id),order:'sequence_no.desc',limit:'40'});
+      if(!n.products.length){n.products=[view.product];n.selected_product_id=p.product_id;await db.update('negotiations',{id:eq(n.id),ai_lock_id:eq(lockId)},{products:n.products,selected_product_id:p.product_id});}
+      const products=[...n.products];if(!products.some(x=>x.id===p.product_id))products.push(view.product);
+      const input:AIInput={requestId:randomUUID(),now:new Date().toISOString(),role:user.role,mode:'negotiation',message,history:[],profile:null,
+        negotiationHistory:history.reverse().filter(m=>['user','assistant'].includes(m.sender)).map(m=>({id:m.id,sender:m.sender==='assistant'?'assistant':m.user_id===n.child_id?'child':'parent',content:m.content,createdAt:m.created_at})),
+        sharedConditions:[],constraints:configChild.constraints,rewardGuidelines:configChild.rewardGuidelines,products:products.map(p=>({...p,imageUrl:null})),selectedProductId:n.selected_product_id,currentProposal:mapProposal(p),negotiationResult:view.negotiationResult};
+      const output=await enrichOutput(await dep.ai(input));
+      await db.rpc('wb_finish_negotiation_ai',{p_actor_id:user.id,p_negotiation_id:n.id,p_lock_id:lockId,p_basis_proposal_id:n.basis_proposal_id,p_basis_version:n.basis_version,p_message:message,p_output:output});
+      return negotiationView(user,await accessibleNegotiation(user,n.id));
+    } catch(e) {
+      await db.rpc('wb_cancel_negotiation_ai',{p_actor_id:user.id,p_negotiation_id:n.id,p_lock_id:lockId}).catch(()=>{});
+      if(e instanceof AppError)throw e;
+      console.error('Negotiation AI failed',{name:e instanceof Error?e.name:'unknown'});
+      throw new AppError(502,'AI_UNAVAILABLE','AIの返答を取得できませんでした。保存済みの交渉を確認してから再操作してください。');
+    }
   }
   async function runAI(user: Row, conversationId: string, message: string | null, searchQuery?: string) {
     rate(`ai:${user.id}`, 20, 600000);
@@ -96,7 +147,7 @@ export function createApp(config: Config, dep: Dependencies) {
       const products = [...c.products];
       if (pv && !products.some(x => x.id === pv.product.id)) products.push(pv.product);
       const child = await one('users', { id: eq(c.child_id || user.id) });
-      const input: AIInput = { searchQuery, childContext: { age: age(child.birth_date), gradeLevel: childView(child).gradeLevel }, requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, expectations: [...new Set([...pref.profile.preferences.expectations, ...configChild.chorePreferences])] } }, sharedConditions: [], constraints: configChild.constraints, rewardGuidelines: configChild.rewardGuidelines, products: products.map(p => ({ ...p, imageUrl: null })), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };
+      const input: AIInput = { searchQuery, childContext: { age: age(child.birth_date), gradeLevel: childView(child).gradeLevel }, requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, expectations: [] } }, sharedConditions: [], constraints: configChild.constraints, rewardGuidelines: configChild.rewardGuidelines, products: products.map(p => ({ ...p, imageUrl: null })), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };
       let output = await dep.ai(input);
       if (output.action === 'PRODUCT') { const products = (await Promise.all(output.products.map(dep.enrich))).filter((p): p is ProductCandidate => p !== null); output = products.length ? { ...output, products } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: 'Amazonの商品ページを確認できませんでした。希望する商品や条件を少し変えて、もう一度探してみましょう。' }; }
       const updated = await db.rpc('wb_finish_ai', { p_actor_id: user.id, p_conversation_id: c.id, p_lock_id: lockId, p_message: message, p_output: output });
@@ -192,7 +243,7 @@ export function createApp(config: Config, dep: Dependencies) {
       const requireParent = () => assert(user.role === 'parent', 403, 'FORBIDDEN', '保護者の操作が必要です。');
       const reauth = () => { requireParent(); assert(session.row.reauthenticated_at && Date.parse(session.row.reauthenticated_at) + 10 * 60000 > Date.now(), 403, 'REAUTH_REQUIRED', '安全のためGoogleで本人確認をしてください。'); };
       if (path === '/api/auth/google/reauthenticate' && method === 'POST') { requireParent(); return result({ authorizationUrl: await startOAuth(user.id) }); }
-      if (path === '/api/auth/logout' && method === 'POST') { await db.update('app_sessions', { token_hash: eq(session.row.token_hash) }, { revoked_at: new Date().toISOString() }); setCookie('session', '', 0); return result({ loggedOut: true }); }
+      if (path === '/api/auth/logout' && method === 'POST') { requireParent(); await db.update('app_sessions', { token_hash: eq(session.row.token_hash) }, { revoked_at: new Date().toISOString() }); setCookie('session', '', 0); return result({ loggedOut: true }); }
       if (path === '/api/profile' && method === 'GET') return result(await profile(user));
       if (path === '/api/profile' && method === 'PATCH') {
         const updates = user.role === 'parent' ? demographic(body) : {};
@@ -270,22 +321,39 @@ export function createApp(config: Config, dep: Dependencies) {
       if (chore && method === 'POST') { const id = uuid(chore[1]); if (chore[2] === 'submit') { assert(user.role === 'child', 403, 'FORBIDDEN'); return result(await db.rpc('wb_submit_chore', { p_actor_id: user.id, p_assignment_id: id, p_answer_text: text(body.note, 1000, true) })); } requireParent(); assert(['approved', 'rejected'].includes(body.decision)); return result(await db.rpc('wb_review_chore', { p_actor_id: user.id, p_assignment_id: id, p_decision: body.decision, p_comment: text(body.reason, 1000, body.decision === 'approved') })); }
       const purchase = /^\/api\/goals\/([\w-]+)\/purchase$/.exec(path);
       if (purchase && method === 'POST') { requireParent(); return result(await db.rpc('wb_purchase_goal', { p_actor_id: user.id, p_goal_id: uuid(purchase[1]) })); }
-      if (path === '/api/conversations' && method === 'GET') { const list = await db.list('conversations', { user_id: eq(user.id), ...(user.role === 'parent' && url.searchParams.has('childId') ? { child_id: eq(uuid(url.searchParams.get('childId'))) } : {}), order: 'created_at.desc', limit: '100' }); return result({ conversations: list.map(c => ({ conversationId: c.id, childId: c.child_id, createdAt: c.created_at, updatedAt: c.latest_ai_output ? c.updated_at || c.created_at : c.created_at })) }); }
+      if (path === '/api/conversations' && method === 'GET') { const list = await db.list('conversations', { user_id: eq(user.id), context_proposal_id: 'is.null', ...(user.role === 'parent' && url.searchParams.has('childId') ? { child_id: eq(uuid(url.searchParams.get('childId'))) } : {}), order: 'created_at.desc', limit: '100' }); return result({ conversations: list.map(c => ({ conversationId: c.id, childId: c.child_id, createdAt: c.created_at, updatedAt: c.latest_ai_output ? c.updated_at || c.created_at : c.created_at })) }); }
       if (path === '/api/conversations' && method === 'POST') {
-        let id = user.role === 'child' ? user.id : body.proposalId ? '' : uuid(body.childId); let reference: Row | null = null;
-        if (body.proposalId) { reference = await accessibleProposal(user, body.proposalId); assert(reference.status !== 'draft', 409, 'CONFLICT'); const n = await one('negotiations', { id: eq(reference.negotiation_id) }); id = n.child_id; }
-        await family(user, id); const pv = reference ? await proposalView(user, reference) : null;
-        const c = (await db.insert('conversations', { user_id: user.id, child_id: id, context_proposal_id: reference?.id || null, products: pv ? [pv.product] : [], selected_product_id: pv?.product.id || null }))[0];
-        return result(body.message ? await runAI(user, c.id, text(body.message)) : await chatView(user, c), 201);
+        assert(!body.proposalId, 409, 'INVALID_STATE', '提案の修正相談は、開始済みの共有交渉で行ってください。');
+        assert(!body.message, 409, 'INVALID_STATE', '個別相談を開始してからメッセージを送信してください。');
+        const id = user.role === 'child' ? user.id : uuid(body.childId);
+        await family(user, id);
+        const c = (await db.insert('conversations', { user_id: user.id, child_id: id }))[0];
+        return result(await chatView(user, c), 201);
       }
-      const conversation = /^\/api\/conversations\/([\w-]+)(\/(messages|selected-product|proposal-drafts|search))?$/.exec(path);
+      const conversation = /^\/api\/conversations\/([\w-]+)(\/(messages|selected-product|proposal-drafts|search|start))?$/.exec(path);
       if (conversation) {
         const c = await ownedChat(user, conversation[1]);
         if (!conversation[3] && method === 'GET') return result(await chatView(user, c));
+        if (conversation[3] === 'start' && method === 'POST') return result(await chatView(user, await db.rpc('wb_start_consultation', { p_actor_id: user.id, p_conversation_id: c.id })));
+        if (conversation[3] && method !== 'GET') assert(await db.rpc('wb_consultation_phase', { p_actor_id: user.id, p_conversation_id: c.id }) === 'consultation', 409, 'INVALID_STATE', '個別相談は開始前、回答待ち、または終了しています。');
         if (conversation[3] === 'search' && method === 'POST') { const query = text(body.query, 300); return result(await runAI(user, c.id, `商品検索：${query}`, query)); }
         if (conversation[3] === 'messages' && method === 'POST') return result(await runAI(user, c.id, text(body.message)));
         if (conversation[3] === 'selected-product' && method === 'PATCH') return result(await chatView(user, await db.rpc('wb_select_product', { p_actor_id: user.id, p_conversation_id: c.id, p_product_id: uuid(body.selectedProductId) })));
         if (conversation[3] === 'proposal-drafts' && method === 'POST') return result(await runAI(user, c.id, null));
+      }
+      if (path === '/api/negotiations' && method === 'GET') {
+        const cs = await children(user);
+        const rows = cs.length ? await db.list('negotiations', { child_id: listOf(cs.map(c => c.childId)), ...(user.role === 'parent' ? { parent_id: eq(user.id) } : {}), order: 'created_at.desc', limit: '100' }) : [];
+        return result({ negotiations: rows.filter(n => n.status === 'revision_requested' || n.latest_ai_output).map(n => ({ negotiationId: n.id, childId: n.child_id, status: n.status, createdAt: n.created_at })) });
+      }
+      const negotiationRoute = /^\/api\/negotiations\/([\w-]+)(\/(messages|selected-product|proposal-drafts))?$/.exec(path);
+      if (negotiationRoute) {
+        const n = await accessibleNegotiation(user, negotiationRoute[1]);
+        if (!negotiationRoute[3] && method === 'GET') return result(await negotiationView(user, n));
+        assert(n.status === 'revision_requested', 409, 'INVALID_STATE', '交渉は開始前、回答待ち、または終了しています。');
+        if (negotiationRoute[3] === 'messages' && method === 'POST') return result(await runNegotiationAI(user, n.id, text(body.message)));
+        if (negotiationRoute[3] === 'proposal-drafts' && method === 'POST') return result(await runNegotiationAI(user, n.id, null));
+        if (negotiationRoute[3] === 'selected-product' && method === 'PATCH') return result(await negotiationView(user, await db.rpc('wb_select_negotiation_product', { p_actor_id: user.id, p_negotiation_id: n.id, p_product_id: uuid(body.selectedProductId) })));
       }
       if (path === '/api/proposals/received' && method === 'GET') { const cs = await children(user); return result({ proposals: (await Promise.all(cs.map(c => proposalsFor(user, c.childId)))).flat().filter(v => !v.canEdit) }); }
       const proposal = /^\/api\/proposals\/([\w-]+)(\/(send|responses))?$/.exec(path);
@@ -293,7 +361,7 @@ export function createApp(config: Config, dep: Dependencies) {
         const p = await accessibleProposal(user, proposal[1]);
         if (!proposal[3] && method === 'GET') return result(await proposalView(user, p));
         const version = integer(body.version); assert(version > 0);
-        if (!proposal[3] && method === 'PATCH') { const updated = await db.rpc('wb_save_proposal', { p_actor_id: user.id, p_conversation_id: p.conversation_id, p_product_id: p.product_id, p_persuasion_text: body.persuasionText === undefined ? p.persuasion_text : text(body.persuasionText, 4000), p_purchase_conditions: body.purchaseConditions === undefined ? p.purchase_conditions : strings(body.purchaseConditions, 12), p_goal_size: p.goal_size, p_proposal_id: p.id, p_expected_version: version, p_based_on_proposal_id: p.based_on_proposal_id }); return result(await proposalView(user, updated)); }
+        if (!proposal[3] && method === 'PATCH') { assert((await proposalView(user,p)).canEdit, 409, 'INVALID_STATE', 'このフェーズでは下書きを編集できません。'); const updated = await db.rpc('wb_save_proposal', { p_actor_id: user.id, p_conversation_id: p.conversation_id, p_product_id: p.product_id, p_persuasion_text: body.persuasionText === undefined ? p.persuasion_text : text(body.persuasionText, 4000), p_purchase_conditions: body.purchaseConditions === undefined ? p.purchase_conditions : strings(body.purchaseConditions, 12), p_goal_size: p.goal_size, p_proposal_id: p.id, p_expected_version: version, p_based_on_proposal_id: p.based_on_proposal_id }); return result(await proposalView(user, updated)); }
         if (proposal[3] === 'send' && method === 'POST') {
           const c = await ownedChat(user, p.conversation_id); const id = c.child_id || user.id; const set = await one('child_settings', { child_id: eq(id) }, false); let parentId = user.role === 'parent' ? user.id : set?.parent_id;
           if (!parentId) { const f = await family(user, id); parentId = (await one('family_members', { family_id: eq(f), family_role: 'eq.parent', order: 'joined_at.asc' })).user_id; }

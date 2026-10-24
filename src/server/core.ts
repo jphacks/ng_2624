@@ -18,7 +18,7 @@ export function date(v: unknown): string | null { if (v === null || v === undefi
 export const randomToken = () => randomBytes(32).toString('base64url');
 export const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 export const equal = (a: string, b: string) => Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-export interface Config { origin: string; supabaseUrl: string; serviceKey: string; publishableKey: string; sessionSecret: string; geminiKey: string; port: number; }
+export interface Config { cookiePrefix?: string; origin: string; supabaseUrl: string; serviceKey: string; publishableKey: string; sessionSecret: string; geminiKey: string; port: number; }
 export function readConfig(env = process.env): Config {
   const origin = new URL(env.APP_ORIGIN || 'http://localhost:3000');
   assert(!origin.username && !origin.password && origin.pathname === '/' && !origin.search && !origin.hash, 500, 'SETUP_REQUIRED', 'APP_ORIGINを確認してください。');
@@ -34,7 +34,7 @@ export function seal(value: Row, secret: string): string {
 export function unseal(value: string, secret: string): Row | null {
   try { const data = Buffer.from(value, 'base64url'); const cipher = createDecipheriv('aes-256-gcm', Buffer.from(hash(secret), 'hex'), data.subarray(0, 12)); cipher.setAuthTag(data.subarray(12, 28)); const result = JSON.parse(Buffer.concat([cipher.update(data.subarray(28)), cipher.final()]).toString()); return result.exp > Date.now() ? result : null; } catch { return null; }
 }
-export function cookieName(config: Config, name: string) { return (config.origin.startsWith('https:') ? '__Host-wb_' : 'wb_local_') + name; }
+export function cookieName(config: Config, name: string) { return (config.cookiePrefix || (config.origin.startsWith('https:') ? '__Host-wb_' : 'wb_local_')) + name; }
 export function cookie(config: Config, name: string, value: string, seconds = 604800) { return `${cookieName(config, name)}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${config.origin.startsWith('https:') ? '; Secure' : ''}`; }
 export function cookies(request: Request): Record<string, string> { return Object.fromEntries((request.headers.get('cookie') || '').split(';').map(x => x.trim().split('=')).filter(x => x.length === 2)); }
 export function protectMutation(request: Request, config: Config, csrf?: string) {

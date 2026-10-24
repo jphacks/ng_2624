@@ -716,3 +716,17 @@ test('parent and target child ages remain distinct in individual consultation', 
     assert.deepEqual(payload.childContext, { age: 9, gradeLevel: 4 });
     assert.deepEqual(payload.profile.age, input().profile?.age);
 });
+
+
+test('standalone chore requests point to Home without starting an AI hearing',async()=>{
+ for(const role of ['parent','child'] as const){
+  const result=await createReply({...input(),mode:'consultation',role,message:role==='parent'?'子どもに洗濯物を干してとお願いしたい':'お手伝いの完了を報告したい'},{generate:async()=>{throw Error('must not call AI for a Home operation');}});
+  assert.equal(result.action,'HEARING');assert.match(result.reply,/ホーム/);assert.doesNotMatch(result.reply,/[？?]/);
+ }
+});
+
+test('chore terms in a product negotiation remain valid conversation content',async()=>{
+ let called=false;
+ await createReply({...input(),message:'商品の購入条件として洗濯物を干すお手伝いをしたい'},{generate:async()=>{called=true;return decision();}});
+ assert.equal(called,true);
+});

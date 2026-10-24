@@ -22,6 +22,15 @@ export async function createReply(
 ): Promise<AIOutput> {
     try {
         const input = parseAIInput(value);
+        // Standalone chore operations belong to Home. Purchase conditions inside an
+        // existing product discussion are still valid consultation/negotiation topics.
+        if (input.mode === 'consultation' && input.message && !input.currentProposal && !input.products.length
+            && /お手伝い|手伝|洗濯|掃除|皿洗い|食器|片付け|ゴミ|ごみ|風呂/.test(input.message)
+            && /依頼|お願い|頼|して|したい|やりたい|干す|報告|承認|完了|登録|生成/.test(input.message)
+            && !/商品|購入|買|目標|条件|ポイント|予算|提案|円/.test(input.message)) {
+            return { requestId: input.requestId, action: 'HEARING', search: null,
+                reply: input.role === 'parent' ? 'お手伝いの依頼や確認は、ホームの「お手伝い」から行ってください。ぽぽとのチャットでは、商品の希望や購入条件を相談できます。' : 'お手伝いの提案や完了報告は、ホームの「お手伝い」からできるよ。ここでは、ほしいものや購入の条件を一緒に考えよう。' };
+        }
         // ボタンによるYesへの応答ではモデルを呼ばず、交渉を開始・改訂しない。
         // 同一提案・版への子供の送信同意と親の承認、合意確定・目標登録はBEが扱う。
         if (input.message === null && input.negotiationResult?.decision === 'approved') {
