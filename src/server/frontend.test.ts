@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 // Execute the shipped script with a small DOM boundary. No application-only test hooks.
 const source=await readFile(new URL('../../frontend/app.js',import.meta.url),'utf8');
 async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>){
- const nodes:any=Object.fromEntries(['#content','#notice','#navigation'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
+ const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
  const location={hash:'#home',search:'',pathname:'/'};
  const events:any={};const window:any={addEventListener:(name:string,fn:any)=>{events[name]=fn;}};
  const context=vm.createContext({window,document:{querySelector:(id:string)=>nodes[id],addEventListener:(name:string,fn:any)=>{events[name]=fn;}},location,
@@ -155,4 +155,18 @@ test('child home still opens the child dashboard',async()=>{
  assert.match(ui.nodes['#content'].innerHTML,/りょ子、おかえり！/);
  assert.match(ui.nodes['#navigation'].innerHTML,/>ホーム</);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/子ども一覧/);
+});
+
+
+test('demo tools do not change navigation or welcome layout',async()=>{
+ for(const authenticated of [true,false]){
+  const regularSession=authenticated?session:{authenticated:false};
+  const regular=await frontend(async path=>path==='/auth/session'?regularSession:basic(path));
+  const demo=await frontend(async path=>path==='/auth/session'?{...regularSession,demo:true}:basic(path));
+  assert.equal(demo.nodes['#navigation'].innerHTML,regular.nodes['#navigation'].innerHTML);
+  assert.equal(demo.nodes['#content'].innerHTML,regular.nodes['#content'].innerHTML);
+  assert.equal(demo.nodes['#demo-tools'].hidden,false);
+  assert.equal(regular.nodes['#demo-tools'].hidden,true);
+  assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/デモ操作/);
+ }
 });

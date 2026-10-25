@@ -1025,3 +1025,19 @@ h1[tabindex="-1"]:focus { outline: none; }
   box-shadow: 0 -4px 18px #214d6510;
 }
 #navigation a { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 4px; text-align: center; font-size: 13px; }
+
+/* Demo tools must not affect the normal screen layout. */
+.demo-tools {
+  position: fixed;
+  z-index: 101;
+  top: 8px;
+  right: max(8px, calc((100vw - 540px) / 2 + 8px));
+  padding: 4px 8px;
+  border: 1px solid #dcecf0;
+  border-radius: 8px;
+  background: #fff;
+  color: #54727e;
+  font-size: 11px;
+  text-decoration: none;
+}
+.demo-tools[hidden] { display: none; }
