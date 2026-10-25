@@ -15,7 +15,6 @@ export interface FERequestDefinition {
   authentication: 'session' | 'pairing' | 'none';
   roles: readonly UserRole[];
   csrf: boolean;
-  googleReauthentication: boolean;
   note: string;
 }
 const str = (max = 4000): InputRule => ({ kind: 'string', max });
@@ -34,11 +33,10 @@ const ownProfile = object({
 function definition(label: string, section: FERequestDefinition['section'], rule: InputRule,
   options: Partial<Omit<FERequestDefinition, 'label' | 'section' | 'rule'>> = {}): FERequestDefinition {
   return { label, section, rule, authentication: 'session', roles: ['parent', 'child'], csrf: true,
-    googleReauthentication: false, note: '', ...options };
+    note: '', ...options };
 }
 const read = { csrf: false };
 const parent = { roles: ['parent'] as const };
-const important = { ...parent, googleReauthentication: true };
 const proposalRef = { proposalId: id, version: integer(1) };
 
 /** 型・検証・Wordの一覧で共用する定義。運用上の権限照合はBEで別途必要。 */
@@ -84,10 +82,9 @@ export const FE_REQUEST_DEFINITIONS: Record<FEOperation, FERequestDefinition> = 
     { authentication: 'none', roles: [], csrf: false, note: '本文なし。現在のCookieに対応するログイン状態とcsrfTokenを取得。' }),
   'auth.google.start': definition('Googleログインを開始', 'auth', object({}),
     { authentication: 'none', roles: [], csrf: false, note: 'BE主導の認可コード方式。JSON本文なし。Googleとの往復はstateで照合。' }),
-  'auth.google.reauthenticate': definition('保護者がGoogleで再認証', 'auth', object({}), parent),
   'auth.logout': definition('現在の端末からログアウト', 'auth', object({})),
   'devices.list': definition('保護者が接続端末を確認', 'auth', object({}), { ...parent, ...read }),
-  'invitation.create': definition('対象の子供の招待QRを発行・再発行', 'auth', object({ childId: id }), important),
+  'invitation.create': definition('対象の子供の招待QRを発行・再発行', 'auth', object({ childId: id }), parent),
   'pairing.bootstrap': definition('子供端末の仮セッションを開始', 'auth', object({}),
     { authentication: 'none', roles: [], csrf: false, note: '本文なし。接続申請用のCookieとcsrfTokenを取得。通常のログイン状態は変更しない。' }),
   'pairing.requests.list': definition('保護者が接続申請を確認', 'auth', object({}), { ...parent, ...read }),
@@ -96,10 +93,10 @@ export const FE_REQUEST_DEFINITIONS: Record<FEOperation, FERequestDefinition> = 
   'pairing.status': definition('子供端末で接続承認の結果を取得', 'auth', object({ pairingRequestId: id }),
     { authentication: 'pairing', roles: [], csrf: false, note: '申請時の仮セッションで端末を確認。IDだけでは結果・セッションを渡さない。' }),
   'pairing.respond': definition('保護者が子供端末の接続を承認・拒否', 'auth', object({ pairingRequestId: id,
-    decision: enumeration('approved', 'rejected') }), important),
+    decision: enumeration('approved', 'rejected') }), parent),
   'pairing.complete': definition('承認済みの接続を子供端末で確定', 'auth', object({ pairingRequestId: id }),
     { authentication: 'pairing', roles: [], note: '申請時の仮CookieとCSRFヘッダーを使う。承認済みの場合だけ通常のログインCookieへ切り替える。' }),
-  'device.revoke': definition('保護者が端末を解除', 'auth', object({ deviceSessionId: id }), important),
+  'device.revoke': definition('保護者が端末を解除', 'auth', object({ deviceSessionId: id }), parent),
 };
 
 export class FEInputError extends Error {

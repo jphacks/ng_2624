@@ -82,7 +82,6 @@ export const RESPONSE_MODELS: Record<string, ResponseSchema> = {
   ] }, csrfToken: str(4096), idleExpiresAt: time, absoluteExpiresAt: time }),
   SignedOutSession: object({ authenticated: enumeration(false), user: nil, csrfToken: nil, idleExpiresAt: nil, absoluteExpiresAt: nil }),
   SessionView: { anyOf: [ref('SignedInSession'), ref('SignedOutSession')] },
-  AuthorizationRedirect: object({ authorizationUrl: url }),
   LogoutResult: object({ loggedOut: enumeration(true) }),
   DeviceView: object({ deviceSessionId: id, role, childId: nullable(id), deviceLabel: str(300), createdAt: time, lastActiveAt: time, isCurrent: bool }),
   DeviceList: object({ devices: array(ref('DeviceView')) }),

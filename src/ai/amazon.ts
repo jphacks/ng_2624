@@ -14,17 +14,6 @@ function plain(value: string): string {
     }).replace(/\s+/g, ' ').trim();
 }
 
-/** 検索カードの商品画像。AmazonのCDN上のHTTPS画像だけを採用する。 */
-function thumbnail(card: string): string | null {
-    const tag = card.match(/<img\b[^>]*\bclass=["'][^"']*\bs-image\b[^"']*["'][^>]*>/i)?.[0];
-    const src = tag?.match(/\ssrc=["']([^"']+)["']/i)?.[1];
-    if (!src) return null;
-    try {
-        const url = new URL(plain(src));
-        return url.protocol === 'https:' && url.hostname === 'm.media-amazon.com' && !url.port && !url.username ? url.href : null;
-    } catch { return null; }
-}
-
 /** Amazonの検索カードから商品ID・商品名・表示価格を同じカード内で取得する。 */
 export function parseAmazonResults(html: string, minJpy: number, maxJpy: number): GenerationResult {
     const result: GenerationResult = { text: '', search: { queries: [], sources: [], searchSuggestionsHtml: null }, evidence: {}, candidates: [] };
@@ -45,9 +34,12 @@ export function parseAmazonResults(html: string, minJpy: number, maxJpy: number)
         if (!Number.isSafeInteger(price) || price < minJpy || price > maxJpy) continue;
         const id = `amazon-${asin}`, url = `https://www.amazon.co.jp/dp/${asin}`;
         const quote = `${name}。表示価格：￥${price.toLocaleString('en-US')}`;
+        const imageTag = card.match(/<img\b[^>]*\bclass=["'][^"']*\bs-image\b[^"']*["'][^>]*>/i)?.[0];
+        const image = imageTag?.match(/\ssrc=["']([^"']+)["']/i)?.[1];
+        const imageUrl = image && /^https:\/\/(?:m\.media-amazon\.com|images-(?:na|fe)\.ssl-images-amazon\.com)\/images\/I\//i.test(image) ? plain(image) : null;
         result.search!.sources.push({ id, url, title: name });
         result.evidence[id] = [quote];
-        result.candidates!.push({ name, priceJpy: price, productUrl: url, imageUrl: thumbnail(card),
+        result.candidates!.push({ name, priceJpy: price, productUrl: url, imageUrl,
             description: name, recommendationReason: 'Amazonで商品と表示価格を確認しました。希望の機能は商品ページで確認してください。', sourceUrls: [url] });
         result.text += `${quote}\n商品ページ：${url}\n`;
         seen.add(asin);
@@ -68,13 +60,14 @@ export async function searchAmazon(request: ConversationRequest, send: typeof fe
     const broadQuery = query.trim().split(/[\s、,]+/u)[0];
     const names = new Set<string>();
     const attempts = [query, broadQuery, 'おもちゃ'];
+    // 再検索で待ち時間を積み増さず、取得全体で8秒。その後の検索エンジン用の時間を残す。
+    const timeout = AbortSignal.timeout(8000);
+    const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
     for (let attempt = 0; attempt < attempts.length; attempt++) {
-        request.signal?.throwIfAborted();
+        signal.throwIfAborted();
         const url = new URL('https://www.amazon.co.jp/s');
         url.searchParams.set('k', attempts[attempt]);
         if (attempt === 0) url.searchParams.set('rh', `p_36:${targetBudget.minJpy * 100}-${targetBudget.maxJpy * 100}`);
-        const timeout = AbortSignal.timeout(8000);
-        const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
         const response = await send(url, { redirect: 'error', signal, headers: { Accept: 'text/html', 'Accept-Language': 'ja-JP' } });
         if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) {
             await response.body?.cancel();

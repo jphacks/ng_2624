@@ -52,34 +52,31 @@ test('rejects oversized pages/images, SVG and content-type spoofing', async () =
     const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => url.pathname === '/product' ? html('<meta name="twitter:image" content="/photo">') : response });
     assert.equal(await preview.fetchProductImage(product.productUrl), null);
   }
-  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async () => html(' '.repeat(1024 * 1024 + 1)) });
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async () => html(' '.repeat(512 * 1024 + 1)) });
   assert.equal(await preview.fetchProductImage(product.productUrl), null);
-});
-test('Amazon search thumbnail is used first without fetching the product page', async () => {
-  const urls: string[] = [];
-  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => { urls.push(url.href); return pngResponse(); } });
-  const amazon = { ...product, productUrl: 'https://www.amazon.co.jp/dp/B000000001', imageUrl: 'https://m.media-amazon.com/images/I/a._AC_UL320_.jpg' };
-  assert.deepEqual(await preview.enrichProduct(amazon), { ...amazon, imageUrl: '/api/products/product-1/image' });
-  assert.deepEqual(urls, ['https://m.media-amazon.com/images/I/a._AC_UL320_.jpg']);
-  assert.deepEqual(await preview.fetchProductImage(amazon.productUrl), { body: png, contentType: 'image/png' }); assert.equal(urls.length, 1);
-});
-test('Amazon product page: main image is read from the start of a large page; non-Amazon image hosts are rejected', async () => {
-  const page = '<img alt="x" src="https://m.media-amazon.com/images/I/main._AC_SY300_.jpg" data-old-hires="https://m.media-amazon.com/images/I/main._AC_SL1500_.jpg" id="landingImage">' + ' '.repeat(2 * 1024 * 1024);
-  const urls: string[] = []; let truncated = false;
-  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async (url, _address, maxBytes, _signal, truncate) => {
-    urls.push(url.href);
-    if (url.hostname !== 'www.amazon.co.jp') return pngResponse();
-    truncated = !!truncate; return html(page.slice(0, maxBytes));
-  } });
-  assert.ok(await preview.fetchProductImage('https://www.amazon.co.jp/dp/B000000001'));
-  assert.equal(truncated, true);
-  assert.deepEqual(urls, ['https://www.amazon.co.jp/dp/B000000001', 'https://m.media-amazon.com/images/I/main._AC_SY300_.jpg']);
-  const other = createProductPreview({ resolve: async () => [publicAddress], read: async url => url.pathname === '/product' ? html('<img id="landingImage" src="https://evil.test/a.png">') : pngResponse() });
-  assert.equal(await other.fetchProductImage(product.productUrl), null);
 });
 test('missing metadata removes unverified AI image and preserves other fields', async () => {
   const preview = createProductPreview({ resolve: async () => [publicAddress], read: async () => html('<title>Product</title>') });
   assert.deepEqual(await preview.enrichProduct(product), { ...product, imageUrl: null });
+});
+
+test('Amazon search image goes straight to the verified CDN without fetching the product HTML', async () => {
+  const calls: string[] = [];
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => { calls.push(url.href); return pngResponse(); } });
+  const candidate = { ...product, productUrl: 'https://www.amazon.co.jp/dp/B000000001', imageUrl: 'https://m.media-amazon.com/images/I/actual-product.png' };
+  assert.equal((await preview.enrichProduct(candidate)).imageUrl, '/api/products/product-1/image');
+  assert.deepEqual(calls, [candidate.imageUrl]);
+  assert.deepEqual(await preview.fetchProductImage(candidate.productUrl), { body: png, contentType: 'image/png' });
+  assert.equal(calls.length, 1);
+});
+
+test('Amazon product pages over 512KB can use their main image without OG metadata', async () => {
+  const page = ' '.repeat(512 * 1024) + '<img id="landingImage" src="https://m.media-amazon.com/images/I/actual-product.png">';
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async (url, _address, limit) => {
+    if (url.hostname === 'www.amazon.co.jp') { assert.equal(limit, 4 * 1024 * 1024); return html(page); }
+    return pngResponse();
+  } });
+  assert.deepEqual(await preview.fetchProductImage('https://www.amazon.co.jp/dp/B000000001'), { body: png, contentType: 'image/png' });
 });
 test('Amazon source resolution accepts product paths and rejects other destinations or unsafe DNS', async () => {
   const direct='https://www.amazon.co.jp/dp/B000000000';let calls=0;

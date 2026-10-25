@@ -5,6 +5,7 @@ import { parseProducts } from './protocol.ts';
 import { GOAL_SIZES, selectRewards } from './rewards.ts';
 import { publicUrl } from './validation.ts';
 import { ConversationError } from './errors.ts';
+import { searchAmazon } from './amazon.ts';
 
 export const SEARCH_BUDGET_MS = 30_000;
 
@@ -40,6 +41,21 @@ export async function searchProducts(
         })));
         controller.signal.throwIfAborted();
         const successful = results.filter((r): r is PromiseFulfilledResult<GenerationResult> => r.status === 'fulfilled');
+        const directAmazon = searchProvider === searchAmazon || successful.some(({ value }) => value.candidates !== undefined);
+        const nativeUrls = new Set(successful.flatMap(({ value }) => (value.candidates ?? []).map(p => p.productUrl)));
+        if (directAmazon && nativeUrls.size < 3) {
+            // データセンターからAmazonを取得できない場合は、検索エンジン経由でAmazonの商品を探す。
+            // 価格帯ごとに3回呼ばず、3候補を1回のFlash検索で取得する。
+            try {
+                const request = buildSearchRequest(query, input);
+                request.systemInstruction += '\n直接取得では候補が不足しました。価格・機能・ブランドの条件を緩め、Amazonの商品詳細ページを3件探してください。価格未確認でも実商品の出典があれば含め、未確認と明記してください。';
+                successful.push({ status: 'fulfilled', value: await generate({ ...request, timeoutMs: 15_000, signal: controller.signal }) });
+            } catch (error) {
+                controller.signal.throwIfAborted();
+                if (!nativeUrls.size) throw error;
+            }
+        }
+        controller.signal.throwIfAborted();
         if (!successful.length) {
             const failed = results.find(r => r.status === 'rejected');
             if (failed?.status === 'rejected') throw failed.reason;
@@ -73,10 +89,10 @@ export async function searchProducts(
             return { products, search };
         }
         if (!search.sources.length) return { products: [], search };
-        const extracted = await generate({ ...buildExtractionRequest(result.text, search, input, result.evidence), timeoutMs: 10_000, signal: controller.signal });
+        const extracted = await generate({ ...buildExtractionRequest(result.text, search, input, result.evidence, directAmazon), timeoutMs: 10_000, signal: controller.signal });
         controller.signal.throwIfAborted();
-        const products: Omit<ProductCandidate, 'size'>[] = [];
-        const usedUrls = new Set<string>();
+        const products: Omit<ProductCandidate, 'size'>[] = successful.flatMap(({ value }) => (value.candidates ?? []).map(candidate => ({ ...candidate, id: createId(), priceCheckedAt: input.now })));
+        const usedUrls = new Set(products.map(p => p.productUrl));
         for (const item of parseProducts(extracted.text)) {
             const source = search.sources.find(source => source.id === item.productSourceId);
             // 未知の出典を混ぜた候補は捨てる。URLをモデルに自由生成させない。
@@ -85,16 +101,16 @@ export async function searchProducts(
             const productUrl = publicUrl(source.url)!;
             if (usedUrls.has(productUrl)) continue;
             const priceJpy = supportedPrice(item.priceJpy, item.priceEvidence, item.sourceIds, result);
-            if (priceJpy === null) continue;
+            if (priceJpy === null && !directAmazon) continue;
             products.push({
                 id: createId(), name: item.name, priceJpy, productUrl, imageUrl: null,
-                priceCheckedAt: input.now,
-                description: item.description, recommendationReason: item.recommendationReason,
+                priceCheckedAt: priceJpy === null ? null : input.now,
+                description: item.description, recommendationReason: item.recommendationReason + (priceJpy === null ? ' 価格は未確認です。' : ''),
                 sourceUrls: [...new Set(item.sourceIds.map(id => publicUrl(search.sources.find(source => source.id === id)!.url)!))],
             });
             usedUrls.add(productUrl);
         }
-        return { products: selectRewards(products, input.rewardGuidelines), search };
+        return { products: selectRewards(products, input.rewardGuidelines, directAmazon), search };
     }
     try { return await Promise.race([work(), deadline]); }
     finally { clearTimeout(timer!); }

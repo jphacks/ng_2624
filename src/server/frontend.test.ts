@@ -22,6 +22,64 @@ const session={authenticated:true,user:{role:'parent',displayName:'保護者',on
 const dashboard={childId:'child',children:[],goals:[],chores:[],choreRequests:[],proposals:[]};
 const basic=async(path:string)=>path==='/auth/session'?session:path.startsWith('/dashboard')?dashboard:{children:[]};
 
+test('initial session failure stops loading and retry restores the authenticated entry',async()=>{
+ let attempts=0;
+ const ui=await frontend(async path=>{
+  if(path==='/auth/session'&&++attempts===1)throw Error('サーバーの応答を確認できません。');
+  if(path==='/profile')return {displayName:'親'};
+  if(path==='/devices')return {devices:[]};
+  if(path==='/pairing/requests')return {requests:[]};
+  return basic(path);
+ });
+ assert.match(ui.nodes['#notice'].textContent,/サーバーの応答/);
+ assert.match(ui.nodes['#content'].innerHTML,/もう一度読み込む/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/読み込んでいます/);
+ assert.equal(ui.state.loading,false);
+ await ui.action('reload');
+ assert.equal(attempts,2);
+ assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
+ assert.equal(ui.nodes['#notice'].textContent,'');
+ assert.equal(ui.nodes['#navigation'].hidden,false);
+ await ui.go('#settings');
+ assert.match(ui.nodes['#content'].innerHTML,/保護者の設定/);
+ assert.match(ui.nodes['#navigation'].innerHTML,/#home/);
+ await ui.go('#home');
+ assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
+});
+
+test('initial session retry shows login when there is no authenticated session',async()=>{
+ let available=false;
+ const ui=await frontend(async()=>{
+  if(!available)throw Error('通信エラー');
+  return {authenticated:false};
+ });
+ available=true;
+ await ui.action('reload');
+ assert.match(ui.nodes['#content'].innerHTML,/Googleで保護者ログイン/);
+ assert.equal(ui.nodes['#navigation'].hidden,true);
+ assert.equal(ui.nodes['#notice'].textContent,'');
+});
+
+test('initial child dashboard failure can be retried without losing the session',async()=>{
+ let available=false,sessions=0;
+ const ui=await frontend(async path=>{
+  if(path==='/auth/session'){sessions++;return {...session,user:{...session.user,role:'child'}};}
+  if(path.startsWith('/dashboard')&&!available)throw Error('サーバーの応答を確認できません。');
+  return basic(path);
+ });
+ assert.match(ui.nodes['#content'].innerHTML,/もう一度読み込む/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/読み込んでいます/);
+ available=true;
+ await ui.action('reload');
+ assert.equal(sessions,1);
+ assert.match(ui.nodes['#content'].innerHTML,/ありがとうポイント/);
+ assert.equal(ui.nodes['#notice'].textContent,'');
+ await ui.go('#chores');
+ assert.match(ui.nodes['#content'].innerHTML,/おてつだい/);
+ await ui.go('#home');
+ assert.match(ui.nodes['#content'].innerHTML,/ありがとうポイント/);
+});
+
 test('a slow conversation response cannot overwrite a newer destination',async()=>{
  let finish:any;const pending=new Promise(resolve=>{finish=resolve;});
  const ui=await frontend(async path=>path==='/conversations/slow'?pending:basic(path));
@@ -214,8 +272,8 @@ test('current device uses logout while other connections use revocation',async()
 test('failed device revocation shows the reason and brings it into view',async()=>{
  const ui=await frontend(basic);
  let scrolled=false;ui.nodes['#notice'].scrollIntoView=()=>{scrolled=true;};
- await ui.run(async()=>{throw Object.assign(new Error('安全のためGoogleで本人確認をしてください。'),{code:'REAUTH_REQUIRED',status:403});});
- assert.match(ui.nodes['#notice'].textContent,/Googleで本人確認/);
+ await ui.run(async()=>{throw Object.assign(new Error('接続を解除できませんでした。'),{code:'FORBIDDEN',status:403});});
+ assert.match(ui.nodes['#notice'].textContent,/接続を解除できませんでした/);
  assert.equal(scrolled,true);
  assert.equal(ui.state.session.authenticated,true);
 });
@@ -330,7 +388,9 @@ test('new unified chat uses existing create, start and product search endpoints'
   if(path.startsWith('/conversations/new'))return thread;
   return basic(path);
  });
+ const scroller=ui.nodes['.chat-scroll-area']={scrollTop:0,scrollHeight:1200};
  await ui.go('#conversations');
+ assert.equal(scroller.scrollTop,1200);
  assert.equal(JSON.stringify(posts),JSON.stringify([{path:'/conversations',body:{}},{path:'/conversations/new/start',body:{}}]));
  assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
  await ui.action('search-product-now');
@@ -339,4 +399,8 @@ test('new unified chat uses existing create, start and product search endpoints'
  assert.equal(posts.at(-1)?.body.fromConversation,true);assert.equal(posts.at(-1)?.body.query,undefined);
  assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="search-products"/);
+ scroller.scrollTop=0;scroller.scrollHeight=2400;
+ await ui.submit('message','',{message:'続きの相談です'});
+ assert.equal(posts.at(-1)?.path,'/conversations/new/messages');
+ assert.equal(scroller.scrollTop,2400);
 });

@@ -8,12 +8,18 @@ type Address = { address: string; family: number };
 type Response = { status: number; headers: Record<string, string | string[] | undefined>; body: Buffer };
 type Dependencies = {
   resolve: (hostname: string) => Promise<Address[]>;
-  /** truncate=true keeps the first maxBytes instead of failing (for HTML pages). */
-  read: (url: URL, address: Address, maxBytes: number, signal: AbortSignal, truncate?: boolean) => Promise<Response>;
+  read: (url: URL, address: Address, maxBytes: number, signal: AbortSignal) => Promise<Response>;
 };
-// Amazon product pages are over 2MB, but the main image appears in the first ~400KB.
-const HTML_LIMIT = 1024 * 1024, IMAGE_LIMIT = 2 * 1024 * 1024;
-const AMAZON_IMAGE_HOSTS = new Set(['m.media-amazon.com', 'images-na.ssl-images-amazon.com', 'images-fe.ssl-images-amazon.com']);
+const HTML_LIMIT = 512 * 1024, IMAGE_LIMIT = 2 * 1024 * 1024;
+const AMAZON_HTML_LIMIT = 4 * 1024 * 1024;
+const amazonHost = (url: URL) => ['amazon.co.jp', 'www.amazon.co.jp'].includes(url.hostname);
+function amazonImage(value: string | null | undefined): URL | null {
+  if (!value) return null;
+  try {
+    const url = httpsUrl(value);
+    return ['m.media-amazon.com', 'images-na.ssl-images-amazon.com', 'images-fe.ssl-images-amazon.com'].includes(url.hostname) && url.pathname.startsWith('/images/I/') ? url : null;
+  } catch { return null; }
+}
 
 /** Conservative public-unicast allowlist, excluding mapped and transition IPv6. */
 export function isPublicAddress(address: string): boolean {
@@ -38,7 +44,7 @@ function httpsUrl(value: string, base?: URL): URL {
 }
 const dependencies: Dependencies = {
   resolve: hostname => lookup(hostname, { all: true, verbatim: true }),
-  read: (url, address, maxBytes, signal, truncate = false) => new Promise((resolve, reject) => {
+  read: (url, address, maxBytes, signal) => new Promise((resolve, reject) => {
     const req = request(url, {
       agent: false, signal, family: address.family,
       lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
@@ -49,16 +55,13 @@ const dependencies: Dependencies = {
       if (status >= 300 && status < 400) {
         resolve({ status, headers: response.headers, body: Buffer.alloc(0) }); response.destroy(); return;
       }
-      if (!truncate && Number(response.headers['content-length']) > maxBytes) { response.destroy(new Error('Preview too large')); return; }
+      if (Number(response.headers['content-length']) > maxBytes) { response.destroy(new Error('Preview too large')); return; }
       const chunks: Buffer[] = []; let size = 0;
-      const finish = () => resolve({ status, headers: response.headers, body: Buffer.concat(chunks).subarray(0, maxBytes) });
       response.on('data', (chunk: Buffer) => {
         size += chunk.length;
-        if (size <= maxBytes) { chunks.push(chunk); return; }
-        if (!truncate) { response.destroy(new Error('Preview too large')); return; }
-        chunks.push(chunk); finish(); response.destroy();
+        if (size > maxBytes) response.destroy(new Error('Preview too large')); else chunks.push(chunk);
       });
-      response.on('end', finish);
+      response.on('end', () => resolve({ status, headers: response.headers, body: Buffer.concat(chunks) }));
     });
     req.on('error', reject); req.end();
   }),
@@ -71,28 +74,21 @@ function decodeHtml(value: string): string {
     return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
   });
 }
-function attributesOf(tag: string): Record<string, string> {
-  const attributes: Record<string, string> = {};
-  for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) attributes[match[1].toLowerCase()] = decodeHtml(match[2] ?? match[3] ?? match[4]);
-  return attributes;
-}
-function amazonImageUrl(value: string | null | undefined, base?: URL): URL | null {
-  if (!value) return null;
-  try { const url = httpsUrl(value, base); return AMAZON_IMAGE_HOSTS.has(url.hostname) ? url : null; } catch { return null; }
-}
 function imageMetadata(html: string, base: URL): URL | null {
   for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
-    const attributes = attributesOf(tag);
+    const attributes: Record<string, string> = {};
+    for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) attributes[match[1].toLowerCase()] = decodeHtml(match[2] ?? match[3] ?? match[4]);
     const property = (attributes.property ?? attributes.name ?? '').toLowerCase();
     if (['og:image', 'og:image:secure_url', 'twitter:image', 'twitter:image:src'].includes(property) && attributes.content) {
       try { return httpsUrl(attributes.content, base); } catch { /* Try other metadata. */ }
     }
   }
-  // Amazon product pages have no og:image; use the main product photo instead.
-  const landing = html.match(/<img\b[^>]*\bid=["']landingImage["'][^>]*>/i)?.[0];
-  if (landing) {
-    const attributes = attributesOf(landing);
-    return amazonImageUrl(attributes.src, base) ?? amazonImageUrl(attributes['data-old-hires'], base);
+  if (amazonHost(base)) for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
+    if (!/\sid=["'](?:landingImage|imgBlkFront|main-image)["']/i.test(tag)) continue;
+    const attributes: Record<string, string> = {};
+    for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attributes[match[1].toLowerCase()] = decodeHtml(match[2] ?? match[3]);
+    const image = amazonImage(attributes['data-old-hires']) ?? amazonImage(attributes.src);
+    if (image) return image;
   }
   return null;
 }
@@ -105,14 +101,14 @@ function validImage(body: Buffer, type: string): boolean {
 export function createProductPreview(deps: Dependencies = dependencies) {
   const cache = new Map<string, { expires: number; image: PreviewImage | null }>();
   const pending = new Map<string, Promise<PreviewImage | null>>();
-  async function read(url: URL, limit: number, signal: AbortSignal, truncate = false): Promise<{ response: Response; url: URL }> {
+  async function read(url: URL, limit: number, signal: AbortSignal): Promise<{ response: Response; url: URL }> {
     for (let redirects = 0; redirects <= 3; redirects++) {
       signal.throwIfAborted();
       const hostname = url.hostname.replace(/^\[|\]$/g, '');
       const addresses = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await deps.resolve(hostname);
       signal.throwIfAborted();
       if (!addresses.length || addresses.some(address => !isPublicAddress(address.address))) throw new Error('Non-public preview host');
-      const response = await deps.read(url, addresses[0], limit, signal, truncate);
+      const response = await deps.read(url, addresses[0], limit, signal);
       if (response.body.length > limit) throw new Error('Preview too large');
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.location;
@@ -124,34 +120,30 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     }
     throw new Error('Too many redirects');
   }
-  async function downloadImage(imageUrl: URL, signal: AbortSignal): Promise<PreviewImage | null> {
+  async function retrieve(productUrl: string, signal: AbortSignal, imageHint?: string | null): Promise<PreviewImage | null> {
     try {
+      const product = httpsUrl(productUrl);
+      let imageUrl = amazonHost(product) ? amazonImage(imageHint) : null;
+      if (!imageUrl) {
+        const page = await read(product, amazonHost(product) ? AMAZON_HTML_LIMIT : HTML_LIMIT, signal);
+        if (!/^text\/html(?:;|$)/i.test(String(page.response.headers['content-type']))) return null;
+        imageUrl = imageMetadata(page.response.body.toString('utf8'), page.url);
+      }
+      if (!imageUrl) return null;
       const image = await read(imageUrl, IMAGE_LIMIT, signal);
       const contentType = String(image.response.headers['content-type']).split(';')[0].trim().toLowerCase();
       return validImage(image.response.body, contentType) ? { body: image.response.body, contentType } : null;
     } catch { return null; }
   }
-  async function retrieve(productUrl: string, signal: AbortSignal, hint: URL | null): Promise<PreviewImage | null> {
-    // The Amazon search thumbnail is fast; the product page is the fallback.
-    const fromHint = hint ? await downloadImage(hint, signal) : null;
-    if (fromHint) return fromHint;
-    try {
-      const page = await read(httpsUrl(productUrl), HTML_LIMIT, signal, true);
-      if (!/^text\/html(?:;|$)/i.test(String(page.response.headers['content-type']))) return null;
-      const imageUrl = imageMetadata(page.response.body.toString('utf8'), page.url);
-      return imageUrl ? await downloadImage(imageUrl, signal) : null;
-    } catch { return null; }
-  }
-  /** imageHint: an Amazon CDN image found during search. Other hosts are ignored. */
   async function fetchProductImage(productUrl: string, imageHint?: string | null): Promise<PreviewImage | null> {
     const cached = cache.get(productUrl);
-    if (cached && cached.expires > Date.now()) return cached.image;
+    if (cached && cached.expires > Date.now() && (cached.image || !imageHint)) return cached.image;
     const existing = pending.get(productUrl); if (existing) return existing;
     if (pending.size >= 4) return null;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<null>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, 8000); });
-    const work = Promise.race([retrieve(productUrl, controller.signal, amazonImageUrl(imageHint)), deadline]).then(image => {
+    const work = Promise.race([retrieve(productUrl, controller.signal, imageHint), deadline]).then(image => {
       cache.delete(productUrl);
       if (cache.size >= 32) cache.delete(cache.keys().next().value!);
       cache.set(productUrl, { expires: Date.now() + 5 * 60_000, image }); return image;

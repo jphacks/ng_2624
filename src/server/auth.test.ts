@@ -11,6 +11,7 @@ test('OAuth binds callback to PKCE cookie and creates only opaque secure app ses
  const start=await app(new Request(config.origin+'/api/auth/google/start'));
  const jar=start.headers.getSetCookie()[0].split(';')[0],flow=unseal(jar.split('=')[1],config.sessionSecret)!;
  const target=new URL(start.headers.get('location')!);assert.equal(target.searchParams.get('code_challenge_method'),'s256');assert.equal(target.searchParams.get('provider'),'google');
+ assert.equal(target.searchParams.has('max_age'),false);assert.equal('reauthUserId' in flow,false);
  const bad=await app(new Request(config.origin+'/api/auth/google/callback?code=x&flow=wrong',{headers:{cookie:jar}}));assert.match(bad.headers.get('location')!,/authError/);assert.equal(authCalls.length,0);
  const good=await app(new Request(config.origin+'/api/auth/google/callback?code=x&flow='+flow.flow,{headers:{cookie:jar}}));assert.equal(good.status,303);assert.equal(authCalls[0].body.code_verifier,flow.verifier);
  const session=good.headers.getSetCookie().find(c=>c.startsWith('__Host-wb_session='))!;assert.match(session,/HttpOnly; SameSite=Lax; Max-Age=\d+; Secure/);assert(!session.includes('never-expose'));assert.equal(saved.token_hash,hash(session.split(';')[0].split('=')[1]));
