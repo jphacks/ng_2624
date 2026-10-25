@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { ConversationError } from '../ai/errors.ts';
+import { CONVERSATION_SEARCH_MESSAGE } from '../ai/prompt.ts';
 import { AppError, assert, text, uuid, integer, strings, date, randomToken, hash, equal, seal, unseal, cookie, cookieName, cookies, protectMutation, configured } from './core.ts';
 import type { Config, DB, Row } from './core.ts';
 import type { AIInput, AIOutput, ProductCandidate } from '../../Sample_db/types.ts';
@@ -351,7 +352,7 @@ export function createApp(config: Config, dep: Dependencies) {
         if (conversation[3] === 'start' && method === 'POST') return result(await chatView(user, await db.rpc('wb_start_consultation', { p_actor_id: user.id, p_conversation_id: c.id })));
         if (conversation[3] && method !== 'GET') assert(await db.rpc('wb_consultation_phase', { p_actor_id: user.id, p_conversation_id: c.id }) === 'consultation', 409, 'INVALID_STATE', '個別相談は開始前、回答待ち、または終了しています。');
         if (conversation[3] === 'search' && method === 'POST') {
-          if (body.fromConversation === true) return result(await runAI(user, c.id, 'これまでの相談内容から、希望に近い商品の検索へ進んでください。検索語には商品名・用途だけを含め、名前や家庭の事情は含めないでください。'));
+          if (body.fromConversation === true) return result(await runAI(user, c.id, CONVERSATION_SEARCH_MESSAGE));
           const query = text(body.query, 300); return result(await runAI(user, c.id, `商品検索：${query}`, query));
         }
         if (conversation[3] === 'messages' && method === 'POST') return result(await runAI(user, c.id, text(body.message)));

@@ -8,7 +8,7 @@ import { createReply } from './conversation.ts';
 import { ConversationError } from './errors.ts';
 import { generateGeminiReply, readGrounding } from './gemini.ts';
 import type { GenerationResult } from './gemini.ts';
-import type { ConversationRequest } from './prompt.ts';
+import { CONVERSATION_SEARCH_MESSAGE, type ConversationRequest } from './prompt.ts';
 import { publicUrl } from './validation.ts';
 import { searchProducts, SEARCH_BUDGET_MS } from './search.ts';
 import { parseAmazonResults, searchAmazon } from './amazon.ts';
@@ -833,9 +833,9 @@ test('Amazon検索は固定HTTPSホスト・価格帯・リダイレクト禁止
         assert.equal(parsed.searchParams.get('rh'), 'p_36:80000-120000');
         assert.equal(init?.redirect, 'error');
         sentSignal = init?.signal ?? undefined;
-        return new Response(amazonCard('B000000001', '車', amazonPrice(1000)), { headers: { 'content-type': 'text/html' } });
+        return new Response([1, 2, 3].map(i => amazonCard(`B00000000${i}`, `車${i}`, amazonPrice(1000))).join(''), { headers: { 'content-type': 'text/html' } });
     });
-    assert.equal(result.search?.sources.length, 1);
+    assert.equal(result.search?.sources.length, 3);
     controller.abort();
     assert.equal(sentSignal?.aborted, true);
 });
@@ -847,6 +847,30 @@ test('Amazonの取得失敗・認証チェック・巨大な応答を商品候�
         new Response('<title>Robot Check</title>', { headers: { 'content-type': 'text/html' } }),
         new Response(' '.repeat(4 * 1024 * 1024 + 1), { headers: { 'content-type': 'text/html' } }),
     ]) await assert.rejects(searchAmazon(request, async () => response), hasCode('API_ERROR'));
+});
+
+test('検索ボタンは聞き取りへ戻らず、価格とキーワードを緩めて実商品3件を返す', async () => {
+    let generations = 0;
+    const requests: URL[] = [];
+    const html = [1500, 5000, 20000].map((price, i) => amazonCard(`B00000000${i}`, `代案${i}`, amazonPrice(price))).join('');
+    const output = await createReply({ ...input(), mode: 'consultation', message: CONVERSATION_SEARCH_MESSAGE }, {
+        generate: async request => { generations++; assert.match(request.systemInstruction, /必ずSEARCH/); return decision(); },
+        search: request => searchAmazon({ ...request, input: JSON.stringify({ ...JSON.parse(request.input), query: '希望の商品 全条件' }) }, async url => {
+            const parsed = new URL(String(url));
+            requests.push(parsed);
+            const body = parsed.searchParams.has('rh') ? '' : parsed.searchParams.get('k') === 'おもちゃ' ? html
+                : amazonCard('B000000000', '代案0', amazonPrice(1500));
+            return new Response(body, { headers: { 'content-type': 'text/html' } });
+        }),
+    });
+    assert.equal(output.action, 'PRODUCT');
+    if (output.action !== 'PRODUCT') return;
+    assert.equal(generations, 1, '取得済み商品をモデルの再選別で空にしない');
+    assert.equal(requests.length, 9);
+    assert.equal(requests.filter(url => url.searchParams.has('rh')).length, 3);
+    assert.deepEqual(output.products.map(p => [p.size, p.priceJpy]), [['small', 1500], ['medium', 5000], ['large', 20000]]);
+    assert.equal(new Set(output.products.map(p => p.productUrl)).size, 3);
+    assert.ok(output.products.every(p => p.productUrl.startsWith('https://www.amazon.co.jp/dp/') && p.recommendationReason.includes('目安金額±20％を外れ')));
 });
 
 test('並列検索で同じ出典IDが使われても、URLごとの価格の根拠を混ぜず大中小を返す', async () => {
