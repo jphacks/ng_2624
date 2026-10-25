@@ -78,10 +78,10 @@ function rememberView(html){if(state.session?.authenticated&&html){viewCache.set
 function captureView(){
  const content=$('#content'),fields=[...(content.querySelectorAll?.('input,textarea,select')||[])];
  const key=e=>{const f=e.closest?.('form');return [f?.dataset.form||'',f?.dataset.id||'',e.name||e.id].join('|');};
- const values=new Map(fields.map(e=>[key(e),{value:e.value,checked:e.checked,focused:document.activeElement===e,start:e.selectionStart,end:e.selectionEnd}]));
+ const values=new Map(fields.map(e=>[key(e),{value:e.value,checked:e.checked,focused:document.activeElement===e,gradeInitialized:e.dataset?.gradeInitialized,start:e.selectionStart,end:e.selectionEnd}]));
  const scroll=[...(content.querySelectorAll?.('.chat-scroll-area,textarea')||[])].map(e=>({top:e.scrollTop,left:e.scrollLeft}));
  const details=[...(content.querySelectorAll?.('details')||[])].map(e=>e.open),dirty=state.dirty,top=window.scrollY,left=window.scrollX;
- return ()=>{for(const e of content.querySelectorAll?.('input,textarea,select')||[]){const v=values.get(key(e));if(!v)continue;if(e.value!==v.value)e.value=v.value;if(v.checked!==undefined&&e.checked!==v.checked)e.checked=v.checked;if(v.focused){e.focus?.({preventScroll:true});if(typeof v.start==='number'&&e.setSelectionRange){try{e.setSelectionRange(v.start,v.end);}catch{}}}}
+ return ()=>{for(const e of content.querySelectorAll?.('input,textarea,select')||[]){const v=values.get(key(e));if(!v)continue;if(e.value!==v.value)e.value=v.value;if(v.checked!==undefined&&e.checked!==v.checked)e.checked=v.checked;if(v.gradeInitialized!==undefined&&e.dataset)e.dataset.gradeInitialized=v.gradeInitialized;if(v.focused){e.focus?.({preventScroll:true});if(typeof v.start==='number'&&e.setSelectionRange){try{e.setSelectionRange(v.start,v.end);}catch{}}}}
  [...(content.querySelectorAll?.('details')||[])].forEach((e,i)=>{if(details[i]!==undefined)e.open=details[i];});
  [...(content.querySelectorAll?.('.chat-scroll-area,textarea')||[])].forEach((e,i)=>{if(scroll[i]){e.scrollTop=scroll[i].top;e.scrollLeft=scroll[i].left;}});state.dirty=dirty;window.scrollTo?.({left,top,behavior:'instant'});};
 }
@@ -259,9 +259,26 @@ async function proposal(id){
 }
 
 const gender=(value=null)=>`<label class="field-label">性別<select name="gender"><option value="">回答しない</option><option value="male" ${value==='male'?'selected':''}>男性</option><option value="female" ${value==='female'?'selected':''}>女性</option><option value="other" ${value==='other'?'selected':''}>その他</option></select></label>`;
-const gradeLabel=n=>!n?'未設定':n<=6?'小学'+n+'年':n<=9?'中学'+(n-6)+'年':'高校'+(n-9)+'年';
-const grade=(value='')=>`<label class="field-label">学年<select name="gradeLevel"><option value="">未就学・未設定</option>${Array.from({length:12},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===Number(value)?'selected':''}>${gradeLabel(n)}</option>`).join('')}</select></label>`;
-function childFields(c={}){return field('ニックネーム','displayName',c.displayName||'','text',true)+field('誕生日','birthDate',c.birthDate||'','date',true)+gender(c.gender)+grade(c.gradeLevel);}
+const gradeLabel=n=>!n?'その他':n<=6?'小学'+n+'年':n<=9?'中学'+(n-6)+'年':'高校'+(n-9)+'年';
+const grade=(value='',initialized=false)=>`<label class="field-label">学年<select name="gradeLevel" data-grade-initialized="${initialized?'true':'false'}"><option value="">その他</option>${Array.from({length:12},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===Number(value)?'selected':''}>${gradeLabel(n)}</option>`).join('')}</select></label>`;
+function schoolYear(now=new Date()){const today=now.toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});return Number(today.slice(0,4))-(today.slice(5,7)<'04'?1:0);}
+function inferGradeFromBirthDate(value,now=new Date()){
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return null;
+ const birth=new Date(value+'T00:00:00Z'),today=now.toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
+ if(!Number.isFinite(birth.getTime())||birth.toISOString().slice(0,10)!==value||value>today)return null;
+ const birthYear=Number(value.slice(0,4));if(birthYear<Number(today.slice(0,4))-120)return null;
+ const entranceYear=birthYear+6+(value.slice(5)>'04-01'?1:0),level=schoolYear(now)-entranceYear+1;
+ return level>=1&&level<=12?String(level):'';
+}
+function fillGradeOnce(input){
+ const form=input.closest?.('form[data-form="create-child"],form[data-form="child-info"]'),select=form?.querySelector?.('select[name="gradeLevel"]');
+ if(!select||select.dataset.gradeInitialized==='true')return;
+ // A value already chosen before the date is entered also takes precedence.
+ if(select.value){select.dataset.gradeInitialized='true';return;}
+ const value=inferGradeFromBirthDate(input.value);if(value===null)return;
+ select.value=value;select.dataset.gradeInitialized='true';
+}
+function childFields(c={}){return field('ニックネーム','displayName',c.displayName||'','text',true)+field('誕生日','birthDate',c.birthDate||'','date',true)+gender(c.gender)+grade(c.gradeLevel,!!c.childId);}
 async function onboarding(){const p=await api('/profile');render(`<h1>はじめまして</h1><p>${parent()?'保護者の情報を入力してください。':'好きなことを、ぽぽに教えてね。名前はおうちの人が登録しています。'}</p>${form('onboarding',parent()?field('お名前','displayName',p.displayName,'text',true)+field('誕生日','birthDate',p.birthDate||'','date',true)+gender(p.profile?.gender):area('好きなこと（1行に1つ）','interests',(p.profile?.preferences?.interests||[]).join('\n'),true),'はじめる')}`);}
 async function children(){
  if(!parent())return home();const [d,received]=await Promise.all([api('/children'),receivedProposals()]);state.childRecords=d.children;
@@ -306,7 +323,7 @@ async function run(task,source){
 const path=id=>encodeURIComponent(id);
 const due=value=>value?new Date(value+'T23:59:59').toISOString():null;
 function amount(value){const n=Number(value);if(value===''||!Number.isSafeInteger(n)||n<0||n%10!==0)throw new Error('ポイントは0以上、10単位で入力してください。');return n;}
-function identity(f){return {displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null,gradeLevel:f.gradeLevel?Number(f.gradeLevel):null,gradeBaseSchoolYear:new Date().getFullYear()-(new Date().getMonth()<3?1:0)};}
+function identity(f){return {displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null,gradeLevel:f.gradeLevel?Number(f.gradeLevel):null,gradeBaseSchoolYear:schoolYear()};}
 async function action(a,id){
  if(a==='pairing-reject')return respondPairingDialog(id,'rejected');
  if(a==='reload'){if(!canLeave())return;return navigate(true);}
@@ -400,7 +417,8 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('input',e=>{if(e.target.closest('[data-form="edit-proposal"]'))state.dirty=true;});
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
 document.addEventListener('submit',e=>{const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();const data=Object.fromEntries(new FormData(f));run(()=>submit(f.dataset.form,f.dataset.id,data),f);});
-document.addEventListener('change',e=>{if(e.target.id==='child-selector'){state.childId=e.target.value;state.goalOrder=[];if(parent()&&location.hash.startsWith('#child-home/')){void go('#child-home/'+path(state.childId));}else if(parent()&&/^#(?:conversation|negotiation)\//.test(location.hash)){void go('#conversations');}else void navigate();}});
+document.addEventListener('focusout',e=>{if(e.target.name==='birthDate')fillGradeOnce(e.target);});
+document.addEventListener('change',e=>{if(e.target.name==='gradeLevel')e.target.dataset.gradeInitialized='true';if(e.target.name==='birthDate'&&document.activeElement!==e.target)fillGradeOnce(e.target);if(e.target.id==='child-selector'){state.childId=e.target.value;state.goalOrder=[];if(parent()&&location.hash.startsWith('#child-home/')){void go('#child-home/'+path(state.childId));}else if(parent()&&/^#(?:conversation|negotiation)\//.test(location.hash)){void go('#conversations');}else void navigate();}});
 document.addEventListener('error',e=>{if(e.target.matches?.('.product-image')){e.target.hidden=true;const fallback=e.target.nextElementSibling;if(fallback)fallback.hidden=false;}},true);
 window.addEventListener('hashchange',()=>{if(!canLeave()){history.replaceState(null,'',state.routeHash||'#home');return;}void navigate();});
 async function initialize(){loading();state.session=await api('/auth/session');const token=new URLSearchParams(location.hash.slice(1)).get('invitationToken');if(token){if(state.session.authenticated){history.replaceState(null,'','#home');await route();notice('ログイン中です。子どもの別端末または別ブラウザーで招待を開いてください。',true);return;}history.replaceState(null,'','/pairing');await pair(token);history.replaceState(null,'','#pairing');return;}if(new URLSearchParams(location.search).has('authError')){history.replaceState(null,'',location.pathname+location.hash);await route();notice('ログインできませんでした。もう一度お試しください。',true);return;}await route();}
