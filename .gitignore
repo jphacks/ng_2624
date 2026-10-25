@@ -10,3 +10,5 @@ supabase/.branches/
 supabase/.temp/
 
 /docs/
+
+present_instruction.md
