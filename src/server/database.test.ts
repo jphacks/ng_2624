@@ -144,5 +144,29 @@ test('database migrations, private proposals, chores, purchases and pairing', as
   await rpc('wb_complete_pairing',[next.id,'bootstrap-hash-2','session-hash-2','csrf-2']);
   assert.equal((await db.query('select count(*)::integer as count from app_sessions where user_id=$1 and revoked_at is null',[child])).rows[0].count,1);
  });
+ await t.test('family history reset is atomic, family-scoped and preserves all account and device information',async()=>{
+  const otherChat=id(500);
+  await db.query("insert into conversations(id,user_id) values($1,$2)",[otherChat,stranger]);
+  await db.query("insert into messages(conversation_id,sender,content) values($1,'user','別家族の履歴')",[otherChat]);
+  await db.query("update conversations set products=jsonb_build_array(jsonb_build_object('id',$1::text)) where id=$2",[product,otherChat]);
+  const keepTables=['users','family_members','app_sessions','child_settings','user_preferences'];
+  const kept=await Promise.all(keepTables.map(async table=>(await db.query(`select * from ${table} order by 1`)).rows));
+  await assert.rejects(rpc('wb_clear_family_history',[child]),/Parent required/);
+  const lease=id(501);await rpc('wb_begin_ai',[child,conv,lease]).catch(()=>{});
+  // A live lease must abort the entire reset before any rows are deleted.
+  await db.query("update conversations set ai_lock_id=$1,ai_lock_expires_at=now()+interval '1 minute' where id=$2",[lease,conv]);
+  const before=(await db.query('select count(*)::integer n from amount_transactions')).rows[0].n;
+  await assert.rejects(rpc('wb_clear_family_history',[parent]),/busy/);
+  assert.equal((await db.query('select count(*)::integer n from amount_transactions')).rows[0].n,before);
+  await db.query('update conversations set ai_lock_id=null,ai_lock_expires_at=null where id=$1',[conv]);
+  await rpc('wb_clear_family_history',[parent]);
+  for(const table of ['messages','conversations'])assert.equal((await db.query(`select count(*)::integer n from ${table}`)).rows[0].n,1);
+  for(const table of ['negotiations','negotiation_messages','proposals','proposal_approvals','goals','tasks','task_assignments','task_submissions','task_reviews','chore_requests','amount_transactions'])assert.equal((await db.query(`select count(*)::integer n from ${table}`)).rows[0].n,0,table);
+  for(let i=0;i<keepTables.length;i++)assert.deepEqual((await db.query(`select * from ${keepTables[i]} order by 1`)).rows,kept[i],keepTables[i]);
+  assert.equal((await db.query('select content from messages')).rows[0].content,'別家族の履歴');
+  assert.equal((await db.query('select count(*)::integer n from products where id=$1',[product])).rows[0].n,1);
+  assert.deepEqual(await rpc('wb_dashboard_totals',[parent,child]),{balanceYen:0,lifetimeEarnedYen:0,weeklyPaceYen:0});
+  await rpc('wb_clear_family_history',[parent]);
+ });
  } finally {await db.close();}
 });

@@ -282,6 +282,7 @@ export function createApp(config: Config, dep: Dependencies) {
       if (method !== 'GET') protectMutation(request, config, session.row.csrf_token);
       rate(`api:${user.id}`, 300, 60000);
       const requireParent = () => assert(user.role === 'parent', 403, 'FORBIDDEN', '保護者の操作が必要です。');
+      if(path==='/api/history'&&method==='DELETE'){requireParent();assert(body.confirmation==='DELETE_ALL_HISTORY',400,'INVALID_INPUT','消去の確認が必要です。');const cleared=await db.rpc('wb_clear_family_history',{p_actor_id:user.id});hydration.clear();return result(cleared);}
       if (path === '/api/auth/logout' && method === 'POST') { requireParent(); await db.update('app_sessions', { token_hash: eq(session.row.token_hash) }, { revoked_at: new Date().toISOString() }); setCookie('session', '', 0); return result({ loggedOut: true }); }
       if (path === '/api/profile' && method === 'GET') return result(await profile(user));
       if (path === '/api/profile' && method === 'PATCH') {
