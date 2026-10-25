@@ -14,29 +14,51 @@ function plain(value: string): string {
     }).replace(/\s+/g, ' ').trim();
 }
 
+function attributes(tag: string): Record<string,string> {
+    return Object.fromEntries([...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)].map(m=>[m[1].toLowerCase(),plain(m[2]??m[3])]));
+}
+function currentPrice(card: string): number | null {
+    for(const start of card.matchAll(/<span\b[^>]*>/gi)){
+        const classes=(attributes(start[0]).class||'').split(/\s+/);
+        if(!classes.includes('a-price')||classes.includes('a-text-price'))continue;
+        let depth=1,end=start.index!+start[0].length;
+        const spans=/<\/?span\b[^>]*>/gi;spans.lastIndex=end;
+        for(let tag;(tag=spans.exec(card));){depth+=/^<\//.test(tag[0])?-1:1;if(!depth){end=tag.index;break;}}
+        if(depth)continue;
+        const widget=card.slice(start.index!+start[0].length,end);
+        const offscreen=widget.match(/<span\b[^>]*class=["'][^"']*\ba-offscreen\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1];
+        let amount=offscreen&&plain(offscreen).match(/^[¥￥]\s*([\d,]+)(?:\.00)?$/)?.[1];
+        // Some Amazon layouts expose the currency and whole amount without a-offscreen.
+        if(!offscreen){
+            const symbol=widget.match(/<span\b[^>]*class=["'][^"']*\ba-price-symbol\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1];
+            const whole=widget.match(/<span\b[^>]*class=["'][^"']*\ba-price-whole\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1];
+            if(symbol&&/^[¥￥]$/.test(plain(symbol))&&whole&&/^[\d,]+$/.test(plain(whole)))amount=plain(whole);
+        }
+        if(amount){const price=Number(amount.replaceAll(',',''));if(Number.isSafeInteger(price)&&price>0)return price;}
+    }
+    return null;
+}
 /** Amazonの検索カードから商品ID・商品名・表示価格を同じカード内で取得する。 */
 export function parseAmazonResults(html: string): GenerationResult {
     const result: GenerationResult = { text: '', search: { queries: [], sources: [], searchSuggestionsHtml: null }, evidence: {}, candidates: [] };
-    const cards = [...html.matchAll(/<div\b[^>]*\bdata-component-type=["']s-search-result["'][^>]*>/g)];
+    const cards = [...html.matchAll(/<div\b[^>]*>/gi)].filter(m => {
+        const attrs=attributes(m[0]);return attrs['data-component-type']==='s-search-result'||(attrs.class||'').split(/\s+/).includes('s-result-item');
+    });
     const seen = new Set<string>();
     for (let i = 0; i < cards.length && seen.size < MAX_CANDIDATES; i++) {
         const asin = cards[i][0].match(/\bdata-asin=["']([A-Z0-9]{10})["']/)?.[1];
         if (!asin || seen.has(asin)) continue;
         const card = html.slice(cards[i].index, cards[i + 1]?.index ?? html.length);
-        const title = card.match(/<h2\b[^>]*>([\s\S]*?)<\/h2>/i)?.[1];
-        const name = title ? plain(title).slice(0, 300) : '';
-        if (!name) continue;
-        const prices = [...card.matchAll(/<span\b[^>]*class=["']([^"']*\ba-price\b[^"']*)["'][^>]*>\s*<span\b[^>]*class=["'][^"']*\ba-offscreen\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/g)];
-        const current = prices.find(p => !p[1].split(/\s+/).includes('a-text-price'));
-        const match = current && plain(current[2]).match(/^[¥￥]\s*([\d,]+)(?:\.00)?$/);
-        if (!match) continue;
-        const price = Number(match[1].replaceAll(',', ''));
-        if (!Number.isSafeInteger(price) || price < 0) continue;
+        const title = card.match(/<h2\b[^>]*>([\s\S]*?)<\/h2>/i);
+        const imageTag = card.match(/<img\b[^>]*\bclass=["'][^"']*\bs-image\b[^"']*["'][^>]*>/i)?.[0];
+        const img=imageTag?attributes(imageTag):{};
+        const name = plain(title?.[1]||attributes(title?.[0]||'')['aria-label']||img.alt||'').slice(0,300);
+        const price=currentPrice(card);
+        if(!name||price===null)continue;
         const id = `amazon-${asin}`, url = `https://www.amazon.co.jp/dp/${asin}`;
         const quote = `${name}。表示価格：￥${price.toLocaleString('en-US')}`;
-        const imageTag = card.match(/<img\b[^>]*\bclass=["'][^"']*\bs-image\b[^"']*["'][^>]*>/i)?.[0];
-        const image = imageTag?.match(/\ssrc=["']([^"']+)["']/i)?.[1];
-        const imageUrl = image && /^https:\/\/(?:m\.media-amazon\.com|images-(?:na|fe)\.ssl-images-amazon\.com)\/images\/I\//i.test(image) ? plain(image) : null;
+        const image=[img.src,img['data-src'],img.srcset?.split(/\s+/)[0]].find(value=>value&&/^https:\/\/(?:m\.media-amazon\.com|images-(?:na|fe)\.ssl-images-amazon\.com)\/images\/I\//i.test(value));
+        const imageUrl=image||null;
         result.search!.sources.push({ id, url, title: name });
         result.evidence[id] = [quote];
         result.candidates!.push({ name, priceJpy: price, productUrl: url, imageUrl,
@@ -58,6 +80,7 @@ export async function searchAmazon(request: ConversationRequest, send: typeof fe
     const broadQuery = query.trim().split(/[\s、,]+/u)[0];
     const names = new Set<string>();
     const attempts = [...new Set([query.trim(), broadQuery])];
+    if(attempts.length===1)attempts.push(query.trim());
     // 同じ検索の重複や無関係なカテゴリへの置き換えを避け、取得全体を8秒に収める。
     const timeout = AbortSignal.timeout(8000);
     const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
@@ -66,6 +89,7 @@ export async function searchAmazon(request: ConversationRequest, send: typeof fe
             signal.throwIfAborted();
             const url = new URL('https://www.amazon.co.jp/s');
             url.searchParams.set('k', attempts[attempt]);
+            if(attempt>0)url.searchParams.set('ref','nb_sb_noss');
             const response = await send(url, { redirect: 'error', signal, headers: { Accept: 'text/html', 'Accept-Language': 'ja-JP' } });
             if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) {
                 await response.body?.cancel();
@@ -89,6 +113,7 @@ export async function searchAmazon(request: ConversationRequest, send: typeof fe
                 throw new ConversationError('API_ERROR', 'Amazonの商品検索を一時的に利用できません。');
             }
             const found = parseAmazonResults(html);
+            if(!found.candidates?.length)console.warn('Amazon search returned no readable cards',{bytes:html.length,cards:(html.match(/data-asin=/g)||[]).length});
             result.search!.queries.push(attempts[attempt]);
             for (const candidate of found.candidates!) {
                 const key = candidate.name.trim().toLowerCase();

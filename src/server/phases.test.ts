@@ -37,7 +37,7 @@ test('child proposal journey, gated parent negotiation, private drafts, agreemen
   await t.test('parents cannot start a private chat, including existing chats and direct database calls',async()=>{
    assert.equal((await parent.call('/conversations','POST',{childId:childUser.id})).status,403);
    const old=(await demo.db.insert('conversations',{user_id:parentUser.id,child_id:childUser.id}))[0];
-   for(const suffix of ['start','messages','proposal-drafts'])assert.equal((await parent.call('/conversations/'+old.id+'/'+suffix,'POST',{message:'相談したい'})).status,403);
+   for(const suffix of ['start','messages','proposal-drafts','reason'])assert.equal((await parent.call('/conversations/'+old.id+'/'+suffix,'POST',{message:'相談したい'})).status,403);
    await assert.rejects(demo.db.rpc('wb_start_consultation',{p_actor_id:parentUser.id,p_conversation_id:old.id}),/phase/);
    assert.equal(inputs.length,0);
    assert.equal((await okay(parent,'/proposals/received')).proposals.length,0);

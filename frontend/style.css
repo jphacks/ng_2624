@@ -1448,3 +1448,6 @@ body:has(#content.chat-layout-v3) {
 .interest-picker label{display:flex;align-items:center;gap:8px;border:1px solid #b8d6e4;border-radius:14px;padding:12px;cursor:pointer}
 .interest-picker label:has(input:checked){background:#d9f1ff;border-color:#008dcc}
 .interest-picker input{width:20px;height:20px;margin:0;accent-color:#008dcc;flex:none}
+
+.reason-heading{font-size:24px;line-height:1.6}
+form[data-form="reason"] textarea{min-height:160px}

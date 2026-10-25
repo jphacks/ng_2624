@@ -464,7 +464,7 @@ test('cancelling the new-chat confirmation changes nothing',async()=>{
  assert.equal(ui.location.hash,'#conversation/old');
 });
 
-test('selected product leads to discussion, draft review and one save-and-send action',async()=>{
+test('商品選択後は理由を自由記述し、確認画面から一度だけ保護者へ送る',async()=>{
  const calls:{path:string,method:string,body:any}[]=[];
  const product={imageUrl:'/api/products/product/image',id:'product',name:'図鑑',priceJpy:1000};
  let draft={id:'draft',productId:'product',status:'draft',version:1,persuasionText:'星を調べたい',purchaseConditions:['大切に使う']};
@@ -473,6 +473,7 @@ test('selected product leads to discussion, draft review and one save-and-send a
   calls.push({path,method,body});
   if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
   if(path==='/conversations/chat')return thread;
+  if(path==='/conversations/chat/reason'){assert.equal(body.reason,'星を調べたい');return thread;}
   if(path==='/conversations/chat/confirm-reason'){assert.equal(body.reasonSummary,'星を調べたい');return {...thread,currentProposal:draft,reasonConfirmed:true};}
   if(path==='/proposals/draft'&&method==='PATCH'){draft={...draft,...body,version:2};return {proposal:draft,product,canEdit:true};}
   if(path==='/proposals/draft/send'){assert.equal(body.version,1);draft={...draft,status:'pending'};return {proposal:draft,product};}
@@ -480,16 +481,16 @@ test('selected product leads to discussion, draft review and one save-and-send a
   return basic(path);
  });
  await ui.go('#conversation/chat');
- assert.match(ui.nodes['#content'].innerHTML,/ほしい理由を教えてね/);
+ assert.match(ui.nodes['#content'].innerHTML,/ほしい りゆうを おしえてね/);assert.match(ui.nodes['#content'].innerHTML,/data-form="reason"/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"/);
  assert.match(ui.nodes['#content'].innerHTML,/chat-selected-title/);
  assert.match(ui.nodes['#content'].innerHTML,/えらびなおす/);
- await ui.action('confirm-reason');
+ await ui.submit('reason','',{reason:'星を調べたい'});
  assert.equal(ui.location.hash,'#proposal/draft');
  assert.match(ui.nodes['#content'].innerHTML,/おうちのひとに おくる/);
- assert.match(ui.nodes['#content'].innerHTML,/個別の会話は共有しません/);
+ assert.match(ui.nodes['#content'].innerHTML,/この しょうひんと りゆうを/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/やくそく|data-form="edit-proposal"/);
  await ui.action('send-proposal','draft');
- assert.deepEqual(calls.filter(c=>c.method!=='GET').map(c=>c.method+' '+c.path),['POST /conversations/chat/confirm-reason','POST /proposals/draft/send']);
+ assert.deepEqual(calls.filter(c=>c.method!=='GET').map(c=>c.method+' '+c.path),['POST /conversations/chat/reason','POST /conversations/chat/confirm-reason','POST /proposals/draft/send']);
  assert.match(ui.nodes['#content'].innerHTML,/へんじまち/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="edit-proposal"/);
 });
@@ -820,4 +821,13 @@ test('子どもへ最初に2つの発言を表示し、自動検索中は結果�
  assert.match(live,/Amazonで ほしいものを さがしているよ。ちょっと まってね。/);
  finish({...thread,messages:[{sender:'assistant',content:'見つかったよ'}]});await pending;
  assert.equal(ui.nodes['#search-progress'],undefined);assert.match(ui.nodes['#content'].innerHTML,/見つかったよ/);
+});
+
+test('好みは保存済みの値を保ち、子ども向けの言葉で表示する',async()=>{
+ const ui=await frontend(async path=>{
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path==='/profile')return {profile:{preferences:{interests:['科学','読書']}}};return basic(path);
+ });await ui.go('#settings');const html=ui.nodes['#content'].innerHTML;
+ assert.match(html,/value="科学" checked><span>じっけん/);assert.match(html,/value="読書" checked><span>ほんを よむこと/);
+ assert.doesNotMatch(html,/<span>(科学|読書|自然|工作|音楽)<\/span>/);
 });

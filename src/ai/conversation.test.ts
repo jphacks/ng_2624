@@ -919,3 +919,16 @@ test('自動検索へ切り替わった直後、検索処理より先に進捗�
  const result=await createReply({...input(),mode:'consultation',sharedConditions:[]},{generate:async()=>decision({action:'SEARCH',searchQuery:'ブロック'}),onSearchStart:()=>{order.push('progress');},search:async()=>{order.push('search');return parseAmazonResults('');}});
  assert.deepEqual(order,['progress','search']);assert.equal(result.action,'HEARING');
 });
+
+test('Amazonの別形式のカード・見出し・価格・画像も同じ商品から取得する',()=>{
+ const html=`<div class="s-result-item s-asin" data-asin="B000000001"><h2 aria-label="マインクラフト"></h2><img class="s-image" data-src="https://m.media-amazon.com/images/I/minecraft.jpg"><span data-a-size="xl" class="a-price"><span aria-hidden="true"><span class="a-price-symbol">￥</span><span class="a-price-whole">3,980</span></span></span></div><div data-asin="B000000002" class="s-result-item"><h2>価格なし</h2></div>`;
+ const found=parseAmazonResults(html).candidates!;assert.equal(found.length,1);assert.equal(found[0].name,'マインクラフト');assert.equal(found[0].priceJpy,3980);assert.match(found[0].imageUrl!,/minecraft.jpg$/);
+});
+test('Amazonが空の表示形式を返した時は同じ検索語で再取得し、別カテゴリには変えない',async()=>{
+ const queries:string[]=[];
+ const result=await searchAmazon({systemInstruction:'',input:JSON.stringify({query:'ゲーム'})},async value=>{
+  const url=new URL(String(value));queries.push(url.searchParams.get('k')!);
+  if(queries.length===2)assert.equal(url.searchParams.get('ref'),'nb_sb_noss');
+  return new Response(queries.length===1?'<main>検索結果を準備中</main>':amazonCard('B000000001','ゲーム',amazonPrice(3980)),{headers:{'Content-Type':'text/html'}});
+ });assert.deepEqual(queries,['ゲーム','ゲーム']);assert.equal(result.candidates!.length,1);
+});
