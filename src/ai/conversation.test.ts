@@ -147,7 +147,7 @@ test('商品検索は共通の期限で通信を中断し、遅れて届いた�
     assert.equal(requests.length, 1);
 });
 
-test('検索から整形へ進んでも30秒の期限を延長しない', async t => {
+test('検索から整形へ進んでも共通の期限を延長しない', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const requests: ConversationRequest[] = [];
     let resolveSearch!: (value: GenerationResult) => void;
@@ -164,7 +164,7 @@ test('検索から整形へ進んでも30秒の期限を延長しない', async 
     resolveSearch(grounded());
     await extractionStarted;
     assert.equal(requests.length, 2);
-    t.mock.timers.tick(10_000);
+    t.mock.timers.tick(SEARCH_BUDGET_MS - 20_000);
     await rejected;
     assert.equal(requests[1].signal?.aborted, true);
 });
@@ -889,7 +889,7 @@ test('Amazon直接取得が拒否されてもFlash検索1回へ切り替え、�
         const found = await searchProducts('ブロック', input(), async request => {
             if (request.search) {
                 searches++;
-                assert.equal(request.timeoutMs, 15_000);
+                assert.equal(request.timeoutMs, 20_000);
                 assert.match(request.systemInstruction, /条件を緩め/);
                 return { text: '実商品の検索結果。価格は未確認。', evidence: {}, search: { queries: ['ブロック Amazon'], searchSuggestionsHtml: null,
                     sources: [0, 1, 2].map(i => ({ id: `s${i}`, title: `ブロック${i}`, url: `https://www.amazon.co.jp/dp/B00000000${i}` })) } };
@@ -931,4 +931,55 @@ test('並列検索で同じ出典IDが使われても、URLごとの価格の根
             evidence: { 'same-id': [`価格は${prices[size]}円です。`] } };
     });
     assert.deepEqual(found.products.map(p => [p.size, p.priceJpy]), [['small', 1000], ['medium', 3000], ['large', 10000]]);
+});
+
+function supplementalProducts(request: ConversationRequest): GenerationResult {
+    const sources = JSON.parse(request.input).sources;
+    return { text: JSON.stringify({ products: sources.map((s: { id: string; title: string }) => ({
+        name: s.title, description: '実商品の出典を確認。', recommendationReason: '条件を緩めた代案です。',
+        productSourceId: s.id, sourceIds: [s.id], priceJpy: null, priceEvidence: null,
+    })) }), search: null, evidence: {} };
+}
+function supplementalSources(count: number): GenerationResult {
+    return { text: '検索で確認した実商品。価格は未確認。', search: { queries: ['ブロック Amazon'], searchSuggestionsHtml: null,
+        sources: Array.from({length:count}, (_,i)=>({id:`s${i}`,title:`ブロック${i}`,url:`https://www.amazon.co.jp/dp/B00000000${i}`})) }, evidence: {} };
+}
+test('補助検索が時間切れでも再検索で実商品3件を提示する', async()=>{
+    let searches=0;
+    const result=await searchProducts('ブロック',input(),async request=>{
+        if(request.search){if(++searches===1)throw new ConversationError('TIMEOUT','timeout');return supplementalSources(3);}
+        return supplementalProducts(request);
+    },()=>crypto.randomUUID(),async()=>parseAmazonResults('',0,10000));
+    assert.equal(searches,2);assert.equal(result.products.length,3);
+    assert.ok(result.products.every(p=>p.priceJpy===null));
+});
+test('補助検索が1商品しか返さないとき、別の商品を追加検索して3件そろえる',async()=>{
+    let searches=0;
+    const result=await searchProducts('ブロック',input(),async request=>request.search?supplementalSources(++searches===1?1:3):supplementalProducts(request),
+        ()=>crypto.randomUUID(),async()=>parseAmazonResults('',0,10000));
+    assert.equal(searches,2);assert.equal(result.products.length,3);
+    assert.equal(new Set(result.products.map(p=>p.productUrl)).size,3);
+});
+test('整形APIが失敗しても直接取得済みの商品を捨てない',async()=>{
+    const result=await searchProducts('ブロック',input(),async request=>{
+        if(request.search)return supplementalSources(3);
+        throw new ConversationError('TIMEOUT','timeout');
+    },()=>crypto.randomUUID(),async()=>parseAmazonResults(amazonCard('B000000009','取得済みブロック',amazonPrice(1000)),0,10000));
+    assert.equal(result.products.length,1);assert.equal(result.products[0].name,'取得済みブロック');
+});
+test('全体の期限に達しても取得済みの商品を表示できる',async t=>{
+    t.mock.timers.enable({apis:['setTimeout']});
+    let entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;});
+    const pending=searchProducts('ブロック',input(),async()=>{entered();return new Promise<GenerationResult>(()=>{});},()=>crypto.randomUUID(),
+        async()=>parseAmazonResults(amazonCard('B000000009','取得済みブロック',amazonPrice(1000)),0,10000));
+    await started;t.mock.timers.tick(SEARCH_BUDGET_MS);
+    const result=await pending;assert.equal(result.products.length,1);
+});
+test('Amazonの追加取得失敗でも先に取得した商品を返す',async()=>{
+    let requests=0;
+    const result=await searchAmazon({systemInstruction:'',input:JSON.stringify({query:'ブロック',targetBudget:{minJpy:800,maxJpy:1200}})},async()=>{
+        if(++requests>1)throw new Error('network error');
+        return new Response(amazonCard('B000000009','取得済みブロック',amazonPrice(1000)),{headers:{'Content-Type':'text/html'}});
+    });
+    assert.equal(result.candidates?.length,1);assert.equal(requests,2);
 });

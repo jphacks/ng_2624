@@ -1409,3 +1409,20 @@ body:has(#content.chat-layout-v3) {
 .chat-child-toggle { display: flex; gap: 6px; overflow-x: auto; flex-shrink: 0; padding: 3px 0 8px; }
 .chat-child-toggle button { flex: 0 0 auto; border: 1px solid #b8d6e4; border-radius: 999px; background: #fff; padding: 8px 14px; cursor: pointer; }
 .chat-child-toggle button[aria-pressed="true"] { background: #007fc5; color: #fff; border-color: #007fc5; }
+
+/* Incoming device approval stays above the current screen. */
+.pairing-dialog{position:fixed;inset:0;margin:auto;width:min(440px,calc(100% - 32px));max-height:calc(100dvh - 48px);box-sizing:border-box;overflow-y:auto;padding:28px;border:1px solid #dcecf0;border-radius:24px;background:#fff;color:#253e49;box-shadow:0 20px 70px #163b4b40}
+.pairing-dialog::backdrop{background:#163b4b70}
+.pairing-dialog h2{margin:0 0 16px;font-size:24px}
+.pairing-dialog p{line-height:1.8;overflow-wrap:anywhere}
+.pairing-dialog input{box-sizing:border-box;font-size:28px;letter-spacing:.25em;text-align:center}
+.pairing-dialog .form-error:empty{display:none}
+.pairing-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+
+/* A single spinner covers foreground requests, including overlapping requests. */
+.activity-indicator{position:fixed;inset:0;margin:auto;width:72px;height:72px;box-sizing:border-box;display:grid;place-items:center;padding:0;border:1px solid #dcecf0;border-radius:22px;background:#fffffff2;box-shadow:0 8px 32px #163b4b26;z-index:10000;pointer-events:none}
+.activity-indicator[hidden]{display:none}
+.activity-indicator::backdrop{background:transparent;pointer-events:none}
+.activity-spinner{display:block;box-sizing:border-box;width:36px;height:36px;border:4px solid #d5eef8;border-top-color:#009ee3;border-radius:50%;animation:activity-spin .8s linear infinite}
+@keyframes activity-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.activity-spinner{animation-duration:2s}}
