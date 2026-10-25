@@ -701,3 +701,36 @@ test('incomplete registrations can be removed and expired established children c
  await ui.action('delete-child','expired');assert.equal(writes.length,0);
  accepts=true;ui.state.childId='expired';await ui.action('delete-child','expired');assert.equal(writes.length,1);assert.equal(writes[0].method,'DELETE');assert.equal(writes[0].path,'/children/expired');assert.equal(writes[0].body.confirmation,'DELETE_CHILD');assert.equal(ui.state.childId,null);assert.equal(ui.location.hash,'#children');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/期限切れの子/);
 });
+
+test('native date segments survive polling while focused or incomplete, then resume updates after completion',async()=>{
+ let changed=false;
+ const ui=await frontend(async path=>{if(path==='/profile')return {displayName:'親'};if(path==='/devices')return {devices:changed?[{deviceLabel:'更新後の端末'}]:[]};if(path==='/pairing/requests')return {requests:[]};return basic(path);});
+ await ui.go('#settings');
+ const content=ui.nodes['#content'];let html=content.innerHTML,replacements=0;
+ const form={dataset:{form:'profile',id:''}};
+ let date:any={name:'birthDate',value:'',nativeSegments:'201',validity:{badInput:true},matches:(s:string)=>s==='input[type="date"]',closest:()=>form};
+ content.querySelectorAll=(selector:string)=>['input[type="date"]','input,textarea,select'].includes(selector)?[date]:[];
+ Object.defineProperty(content,'innerHTML',{get:()=>html,set:(value:string)=>{replacements++;html=value;date={...date,value:'',nativeSegments:''};}});
+ ui.document.activeElement=date;changed=true;await ui.refreshVisible();assert.equal(replacements,0);assert.equal(date.nativeSegments,'201');
+ ui.document.activeElement=null;await ui.refreshVisible();assert.equal(replacements,0);assert.equal(date.nativeSegments,'201');
+ date.validity.badInput=false;date.value='2010-04-02';await ui.refreshVisible();assert.equal(replacements,1);assert.equal(date.value,'2010-04-02');assert.match(content.innerHTML,/更新後の端末/);
+});
+
+test('unchanged background HTML never rewrites field values',async()=>{
+ const ui=await frontend(async path=>{if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};return basic(path);});
+ let writes=0;const field={name:'text',closest:()=>({dataset:{form:'test'}}),get value(){return '';},set value(_v:string){writes++;}};
+ ui.nodes['#content'].querySelectorAll=(selector:string)=>selector==='input,textarea,select'?[field]:[];
+ await ui.refreshVisible();assert.equal(writes,0);
+});
+
+test('chat Enter submits once; Shift+Enter, IME confirmation and non-chat fields do not submit',async()=>{
+ const ui=await frontend(basic);let submits=0,prevented=0;
+ const form={requestSubmit(){submits++;}},input={value:'こんにちは',closest:(selector:string)=>selector==='form[data-form="message"]'?form:null,matches:(selector:string)=>selector==='textarea[name="message"]'};
+ const key=(extra:any={})=>ui.events.keydown({key:'Enter',target:input,preventDefault(){prevented++;},...extra});
+ key();assert.equal(submits,1);assert.equal(prevented,1);
+ key({shiftKey:true});key({isComposing:true});key({keyCode:229});key({ctrlKey:true});assert.equal(submits,1);assert.equal(prevented,1);
+ ui.events.compositionstart();key();assert.equal(submits,1);ui.events.compositionend();
+ key({repeat:true});ui.state.busy=true;key();ui.state.busy=false;input.value='  ';key();assert.equal(submits,1);
+ key({target:{...input,value:'設定欄',closest:()=>null}});assert.equal(submits,1);
+ input.value='つづき';key();assert.equal(submits,2);
+});
