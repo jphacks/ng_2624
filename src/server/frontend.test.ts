@@ -688,3 +688,16 @@ test('pairing uses automatic dialog without a duplicate settings section or manu
  pending=true;await ui.checkPairingRequests();assert.equal(ui.nodes['#pairing-dialog'].open,true);assert.match(ui.nodes['#pairing-dialog'].innerHTML,/6桁の確認番号/);
  await ui.go('#children');assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
 });
+
+test('incomplete registrations can be removed and expired established children can reconnect or be explicitly deleted',async()=>{
+ let accepts=false;const writes:any[]=[];let records=[{childId:'pending',displayName:'未完了の子',hasCompletedPairing:false,hasLinkedDevice:false},{childId:'expired',displayName:'期限切れの子',hasCompletedPairing:true,hasLinkedDevice:false}];
+ const ui=await frontend(async(path,method='GET',body)=>{
+  if(method!=='GET'){writes.push({path,method,body});if(path==='/children/expired')records=records.filter(c=>c.childId!=='expired');return {deleted:true};}
+  if(path==='/children')return {children:records};if(path==='/children/expired/settings')return {constraints:{mustHave:[],mustAvoid:[]}};if(path==='/proposals/received')return {proposals:[]};return basic(path);
+ },message=>{assert.match(message,/期限切れの子/);assert.match(message,/元に戻せません/);return accepts;});
+ await ui.go('#children');let html=ui.nodes['#content'].innerHTML;
+ assert.match(html,/登録を続ける/);assert.match(html,/data-action="delete-child" data-id="pending"/);assert.match(html,/端末をつなぎ直す/);assert.doesNotMatch(html,/端末未接続/);assert.equal(writes.length,0);
+ await ui.go('#child-settings/expired');assert.match(ui.nodes['#content'].innerHTML,/data-action="delete-child" data-id="expired"/);
+ await ui.action('delete-child','expired');assert.equal(writes.length,0);
+ accepts=true;ui.state.childId='expired';await ui.action('delete-child','expired');assert.equal(writes.length,1);assert.equal(writes[0].method,'DELETE');assert.equal(writes[0].path,'/children/expired');assert.equal(writes[0].body.confirmation,'DELETE_CHILD');assert.equal(ui.state.childId,null);assert.equal(ui.location.hash,'#children');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/期限切れの子/);
+});
