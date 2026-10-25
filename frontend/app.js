@@ -230,7 +230,9 @@ const chatPath=()=>state.chat.mode==='negotiation'?'/negotiations/'+path(state.c
 function chatMessage(m){
  const assistant=m.sender==='assistant', own=m.own??m.sender==='user';
  const label=assistant?'ぽぽ':m.sender==='parent'?'保護者':m.sender==='child'?'子ども':'あなた';
- const bubble=`<article class="chat-message ${assistant?'assistant':own?'person':'participant'}"><small>${label}</small><p>${esc(assistant&&!parent()?String(m.content).replace(/\s*ねだんは変わることもあるよ。$/,''):m.content)}</p></article>`;
+ let content=assistant&&!parent()?String(m.content).replace(/\s*ねだんは変わることもあるよ。$/,''):m.content;
+ if(assistant&&!parent()&&state.chat?.mode==='negotiation')content=String(content).replace(/[^。！？\n]*「結論を出す」[^。！？\n]*[。！？]?/gu,'さいごの おへんじは、おうちのひとが きめるよ。');
+ const bubble=`<article class="chat-message ${assistant?'assistant':own?'person':'participant'}"><small>${label}</small><p>${esc(content)}</p></article>`;
  return assistant?`<div class="assistant-message"><span class="dove message-avatar" aria-hidden="true"></span>${bubble}</div>`:bubble;
 }
 function renderReasonEntry(d,selected){
@@ -248,6 +250,10 @@ async function negotiationDecision(id){
  render(`<a class="back-link" href="#negotiation/${path(id)}">← 相談に戻る</a><h1>相談の結論</h1><p>${esc(d.proposalView?.product?.name||d.products?.find(p=>p.id===d.currentProposal?.productId)?.name||'相談中の商品')}</p>${form('decide-negotiation',`<label class="field-label">結論<select name="decision"><option value="">選んでください</option><option value="approved">購入をOKする</option><option value="rejected">今回は見送る</option></select></label>${area('ひとこと（見送る場合は必須）','reason')}<p>送信すると親子に結論が伝わり、この相談を終了します。</p>`,'結論を送信する',id)}`);
 }
 function renderChat(d){
+ const previous=state.chat,oldScroller=$('.chat-scroll-area');
+ const sameChat=previous?.mode===d.mode&&(d.mode==='negotiation'?previous?.negotiationId===d.negotiationId:previous?.conversationId===d.conversationId);
+ const received=sameChat&&JSON.stringify(previous?.messages?.at(-1))!==JSON.stringify(d.messages?.at(-1));
+ const following=!oldScroller||oldScroller.scrollHeight-oldScroller.clientHeight-oldScroller.scrollTop<=80;
  state.chat=d;
  const shared=d.mode==='negotiation', active=d.canMessage===true;
  const intro=shared?kid('ここでは、お子さんと一緒に、この商品の購入について相談できます。ぽぽが双方の考えを整理します。このチャットの内容は親子で共有されます。','ここでは、おうちの人といっしょに、この商品を買ってよいか相談しよう。ぽぽが話を整理するよ。ここでのお話は親子で見られるよ。'):parent()?'ぽぽです。お子さんの目標に関する購入条件を一緒に整理します。この個別相談はあなたにだけ表示されます。':'ぽぽだよ。ここでの おはなしは、きみだけに みえるよ。';
@@ -260,7 +266,7 @@ function renderChat(d){
  render(`${shared?sharedContext(d):selected?`<div class="chat-selected-title">${esc(selected.name)}</div>`:''}${parent()&&state.chatThreads?.children?.length?`<div class="chat-child-toggle" role="group" aria-label="子どもを選択">${state.chatThreads.children.map(c=>`<button type="button" data-action="select-chat-child" data-id="${esc(c.childId)}" aria-pressed="${c.childId===state.childId}">${esc(c.displayName)}</button>`).join('')}</div>`:''}<div class="chat-scroll-area"><div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${opening?chatMessage({sender:'assistant',content:opening}):''}${!shared&&!parent()?chatMessage({sender:'assistant',content:'したいことや ほしいものは ある？'}):''}${(d.messages ?? []).map(chatMessage).join('')}</div>${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${chatProducts(d,active,shared)}${chatNextStep(d,active,shared)}</div><div class="chat-fixed-footer"><div class="chat-actions">${shared&&parent()&&active?btn('結論を出す','decide-negotiation',d.negotiationId):''}${active&&!shared?btn(kid('Yahoo!ショッピングで商品を探す','🔎 ほしいものを さがす'),'search-product-now'):''}${!parent()&&!shared?`<button type="button" class="btn-pill new-chat-btn" data-action="new-chat">＋ あたらしく はなす</button>`:''}</div>${active?form('message',area(messageLabel,'message','',true,messageLabel),kid('送信する','おくる')):empty(d.phase==='awaiting_response'?kid('子どもからの購入確認への返事を待っています。','おうちのひとの おへんじを まっているよ。'):d.phase==='closed'?kid('この相談は終了しました。履歴を確認できます。','この おはなしは おわったよ。'):d.phase==='negotiation'&&!shared?'つづきは、おうちのひとと いっしょに そうだんしよう。':'')}</div>`);
  $('#content').classList?.add('chat-layout-v3');
  const scroller=$('.chat-scroll-area');
- if(scroller&&backgroundEpoch!==state.epoch)scroller.scrollTop=scroller.scrollHeight;
+ if(scroller&&(backgroundEpoch!==state.epoch||(received&&following)))scroller.scrollTop=scroller.scrollHeight;
 }
 async function chat(id){
  if(parent())return conversations();

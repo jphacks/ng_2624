@@ -965,3 +965,31 @@ test('共有相談は入力を待たず案内と保護者の返答に沿った�
   await ui.refreshVisible();assert.equal((ui.nodes['#content'].innerHTML.match(/class="chat-message assistant"/g)||[]).length,2);
  }
 });
+
+test('保護者への結論操作の案内は子ども側ではやさしい言葉にする',async()=>{
+ const reply='半分こしてくれる気持ちが伝わってよかったですね。\n\nおうちの方へ、購入についての最終的なお返事は画面の「結論を出す」ボタンから進めていただけます。';
+ for(const role of ['parent','child']){
+  const thread={mode:'negotiation',negotiationId:'shared',canMessage:true,phase:'negotiation',products:[],messages:[{id:'reply',sender:'assistant',content:reply},{id:'parent',sender:'parent',content:'結論を出すのはあとにするね'}]};
+  const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/negotiations/shared'?thread:basic(path));
+  await ui.go('#negotiation/shared');const html=ui.nodes['#content'].innerHTML;
+  if(role==='child'){assert.match(html,/さいごの おへんじは、おうちのひとが きめるよ。/);assert.doesNotMatch(html,/進めていただけます|購入についての最終的な/);}
+  else assert.match(html,/進めていただけます/);
+  assert.match(html,/半分こしてくれる気持ちが伝わってよかったですね/);assert.match(html,/結論を出すのはあとにするね/);
+ }
+});
+test('受信側も末尾を見ているときは新しい返信へスクロールし、読み返している間は位置を保つ',async()=>{
+ for(const role of ['parent','child']){
+  let thread={mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,products:[],messages:[{id:'first',sender:'assistant',content:'相談しよう'}]};
+  const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/negotiations/shared'?thread:basic(path));
+  let scroller={scrollTop:0,scrollHeight:1200,clientHeight:240,scrollLeft:0};ui.nodes['.chat-scroll-area']=scroller;
+  await ui.go('#negotiation/shared');scroller.scrollTop=960;
+  const content=ui.nodes['#content'];let html=content.innerHTML;
+  content.querySelectorAll=(selector:string)=>selector==='.chat-scroll-area,textarea'?[scroller]:[];
+  Object.defineProperty(content,'innerHTML',{get:()=>html,set:(value:string)=>{html=value;scroller={...scroller,scrollTop:0,scrollHeight:scroller.scrollHeight+300};ui.nodes['.chat-scroll-area']=scroller;}});
+  thread={...thread,messages:[...thread.messages,{id:'received',sender:'assistant',content:'おへんじが届いたよ'}]};
+  await ui.refreshVisible();assert.equal(scroller.scrollTop,1500);
+  scroller.scrollTop=200;thread={...thread,messages:[...thread.messages,{id:'later',sender:'assistant',content:'続きのおへんじ'}]};
+  await ui.refreshVisible();assert.equal(scroller.scrollTop,200);
+  scroller.scrollTop=300;await ui.refreshVisible();assert.equal(scroller.scrollTop,300);
+ }
+});
