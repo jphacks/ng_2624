@@ -18,7 +18,7 @@ test('child proposal journey, gated parent negotiation, private drafts, agreemen
   }
   if(input.message===CONVERSATION_SEARCH_MESSAGE||input.message.includes('商品を探す'))return {requestId:input.requestId,action:'PRODUCT',reply:'候補です',search:null,products:[{id:randomUUID(),name:'候補商品',priceJpy:1000,size:'small',productUrl:'https://www.amazon.co.jp/dp/B000000000',sourceUrls:['https://www.amazon.co.jp/dp/B000000000'],priceCheckedAt:new Date().toISOString(),description:'商品の説明',recommendationReason:'用途に合います'}]};
   return {requestId:input.requestId,action:'HEARING',reply:'条件を整理します。',search:null};
- },enrich:async p=>p,image:async()=>null,qr:async()=>''});
+ },enrich:async p=>({...p,imageUrl:'/api/products/'+p.id+'/image'}),image:async()=>null,qr:async()=>''});
  function browser(){
   const jar=new Map<string,string>();let csrf='',control='';
   return {async call(path:string,method='GET',body?:unknown){

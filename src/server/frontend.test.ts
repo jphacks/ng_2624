@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 
 // Execute the shipped script with a small DOM boundary. No application-only test hooks.
 const source=await readFile(new URL('../../frontend/app.js',import.meta.url),'utf8');
-async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>,confirm=(_message:string)=>true){
+async function frontend(request:(path:string,method?:string,body?:any,onProgress?:(progress:string)=>void)=>Promise<any>,confirm=(_message:string)=>true){
  const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools','#role-label','#pairing-dialog','#pairing-error','#activity-indicator'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
  nodes['#activity-indicator'].hidden=true;
  const dialog=nodes['#pairing-dialog'];dialog.open=false;dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;};dialog.addEventListener=()=>{};
@@ -466,7 +466,7 @@ test('cancelling the new-chat confirmation changes nothing',async()=>{
 
 test('selected product leads to discussion, draft review and one save-and-send action',async()=>{
  const calls:{path:string,method:string,body:any}[]=[];
- const product={id:'product',name:'図鑑',priceJpy:1000};
+ const product={imageUrl:'/api/products/product/image',id:'product',name:'図鑑',priceJpy:1000};
  let draft={id:'draft',productId:'product',status:'draft',version:1,persuasionText:'星を調べたい',purchaseConditions:['大切に使う']};
  const thread={conversationId:'chat',mode:'consultation',phase:'consultation',canMessage:true,messages:[{sender:'assistant',content:'ほしい理由を教えてね'}],products:[product],selectedProductId:'product',currentProposal:null as any,reasonSummary:'星を調べたい',reasonConfirmed:false};
  const ui=await frontend(async(path,method='GET',body)=>{
@@ -593,14 +593,14 @@ test('spinner stays visible while an older overlapping request is still pending'
  assert.equal(ui.nodes['#activity-indicator'].hidden,true);
 });
 
-test('画像URLなしで保存された商品も画像APIから取得を試みる',async()=>{
+test('画像URLなしで保存された候補は選択肢へ表示しない',async()=>{
  const ui=await frontend(async path=>{
   if(path==='/conversations/images')return {conversationId:'images',messages:[],products:[{id:'game-1',name:'ゲーム',imageUrl:null,productUrl:'https://www.amazon.co.jp/dp/B000000001',priceJpy:1000}]};
   return basic(path);
  });
  ui.state.session={...session,user:{...session.user,role:'child'}};
  await ui.chat('images');
- assert.match(ui.nodes['#content'].innerHTML,/<img class="product-image" src="\/api\/products\/game-1\/image"/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/<img class="product-image"/);assert.match(ui.nodes['#content'].innerHTML,/もういちど Amazonで/);
 });
 
 test('商品カードは画像・商品名・円価格を表示し説明文を表示しない',async()=>{
@@ -801,4 +801,23 @@ test('複数のチェックと自由入力をまとめてプロフィールへ�
  ui.events.submit({target:{closest:()=>form},preventDefault(){}});
  await new Promise(resolve=>setImmediate(resolve));
  assert.deepEqual(Array.from(saved.profile.preferences.interests),['ゲーム','音楽','ロボット','宇宙']);
+});
+
+test('子どもへ最初に2つの発言を表示し、自動検索中は結果より先にぽぽが案内する',async()=>{
+ let finish!:(value:any)=>void;
+ const thread={conversationId:'progress',mode:'consultation',phase:'consultation',canMessage:true,products:[],messages:[]};
+ const ui=await frontend(async(path,method,body,onProgress)=>{
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path==='/conversations/progress/messages'){onProgress?.('searching');return new Promise(resolve=>{finish=resolve;});}
+  if(path==='/conversations/progress')return thread;
+  return basic(path);
+ });
+ await ui.chat('progress');
+ const html=ui.nodes['#content'].innerHTML;
+ assert.equal((html.match(/class="chat-message assistant"/g)||[]).length,2);assert.match(html,/いま、なにか ほしいものは ある？/);
+ let live='';ui.nodes['.chat-log']={insertAdjacentHTML(_position:string,html:string){live=html;ui.nodes['#search-progress']={remove(){delete ui.nodes['#search-progress'];}};}};
+ const pending=ui.submit('message','',{message:'Nintendo Switchがほしい'});
+ assert.match(live,/Amazonで ほしいものを さがしているよ。ちょっと まってね。/);
+ finish({...thread,messages:[{sender:'assistant',content:'見つかったよ'}]});await pending;
+ assert.equal(ui.nodes['#search-progress'],undefined);assert.match(ui.nodes['#content'].innerHTML,/見つかったよ/);
 });

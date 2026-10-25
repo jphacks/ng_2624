@@ -57,8 +57,8 @@ export async function searchAmazon(request: ConversationRequest, send: typeof fe
     const seen = new Set<string>();
     const broadQuery = query.trim().split(/[\s、,]+/u)[0];
     const names = new Set<string>();
-    const attempts = [query, broadQuery, 'おもちゃ'];
-    // 再検索で待ち時間を積み増さず、取得全体で8秒。その後の検索エンジン用の時間を残す。
+    const attempts = [...new Set([query.trim(), broadQuery])];
+    // 同じ検索の重複や無関係なカテゴリへの置き換えを避け、取得全体を8秒に収める。
     const timeout = AbortSignal.timeout(8000);
     const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
     for (let attempt = 0; attempt < attempts.length; attempt++) {

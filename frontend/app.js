@@ -148,7 +148,9 @@ async function requests(){
 function chatProducts(d,active,shared){
  if(!d.products?.length||shared)return '';
  const selected=d.products.find(p=>p.id===d.selectedProductId);
- const candidates=`<section class="product-list">${d.products.map(p=>product(p,active?'select-product':'')).join('')}</section>`;
+ const ready=d.products.filter(p=>p.priceJpy>0&&image(p.imageUrl));
+ if(!ready.length)return empty(kid('画像と価格を取得できませんでした。Amazonで検索し直してください。','画像と ねだんが わからなかったよ。もういちど Amazonで さがしてね。'));
+ const candidates=`<section class="product-list">${ready.map(p=>product(p,active?'select-product':'')).join('')}</section>`;
  return selected?`<details class="selected-product-details"><summary>えらんだものを みなおす・えらびなおす</summary>${candidates}</details>`:candidates;
 }
 function chatNextStep(d,active,shared){
@@ -233,11 +235,11 @@ function chatMessage(m){
 function renderChat(d){
  state.chat=d;
  const shared=d.mode==='negotiation', active=d.canMessage===true;
- const intro=shared?'ここでは、おうちの人といっしょに、この商品を買ってよいか相談しよう。ぽぽが話を整理するよ。ここでのお話は親子で見られるよ。':parent()?'ぽぽです。お子さんの目標に関する購入条件を一緒に整理します。この個別相談はあなたにだけ表示されます。':'ぽぽだよ。ほしいものや、ほしい りゆうを いっしょに かんがえよう。ここでの おはなしは、きみだけに みえるよ。';
+ const intro=shared?'ここでは、おうちの人といっしょに、この商品を買ってよいか相談しよう。ぽぽが話を整理するよ。ここでのお話は親子で見られるよ。':parent()?'ぽぽです。お子さんの目標に関する購入条件を一緒に整理します。この個別相談はあなたにだけ表示されます。':'ぽぽだよ。ここでの おはなしは、きみだけに みえるよ。';
  // The composer label is visually hidden, so the same text is shown as a placeholder.
  const messageLabel=shared?kid('親子に公開するメッセージ','おうちのひとにも みえる メッセージ'):'ぽぽへのメッセージ';
  const selected=d.products?.find(p=>p.id===d.selectedProductId);
- render(`${selected?`<div class="chat-selected-title">${esc(selected.name)}</div>`:''}${parent()&&state.chatThreads?.children?.length?`<div class="chat-child-toggle" role="group" aria-label="子どもを選択">${state.chatThreads.children.map(c=>`<button type="button" data-action="select-chat-child" data-id="${esc(c.childId)}" aria-pressed="${c.childId===state.childId}">${esc(c.displayName)}</button>`).join('')}</div>`:''}<div class="chat-scroll-area"><div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${(d.messages ?? []).map(chatMessage).join('')}</div>${shared?`<section class="shared-context"><h2>${esc(d.proposalView?.product?.name||d.products?.find(p=>p.id===d.currentProposal?.productId)?.name||'そうだんするもの')}</h2><p>ほしい りゆう：${esc(d.currentProposal?.persuasionText)}</p>${d.proposalView?.negotiationResult?.reason?`<p>おうちの人の おへんじ：${esc(d.proposalView.negotiationResult.reason)}</p>`:''}</section>`:''}${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${chatProducts(d,active,shared)}${chatNextStep(d,active,shared)}</div><div class="chat-fixed-footer"><div class="chat-actions">${active&&!shared?btn('🔎 そろそろ商品を探す','search-product-now'):''}${!parent()?`<button type="button" class="btn-pill new-chat-btn" data-action="new-chat">＋ あたらしく はなす</button>`:''}</div>${active?form('message',area(messageLabel,'message','',true,messageLabel),kid('送信する','おくる')):empty(d.phase==='awaiting_response'?kid('子どもからの購入確認への返事を待っています。','おうちのひとの おへんじを まっているよ。'):d.phase==='closed'?kid('この相談は終了しました。履歴を確認できます。','この おはなしは おわったよ。'):d.phase==='negotiation'&&!shared?'つづきは、おうちのひとと いっしょに そうだんしよう。':'')}</div>`);
+ render(`${selected?`<div class="chat-selected-title">${esc(selected.name)}</div>`:''}${parent()&&state.chatThreads?.children?.length?`<div class="chat-child-toggle" role="group" aria-label="子どもを選択">${state.chatThreads.children.map(c=>`<button type="button" data-action="select-chat-child" data-id="${esc(c.childId)}" aria-pressed="${c.childId===state.childId}">${esc(c.displayName)}</button>`).join('')}</div>`:''}<div class="chat-scroll-area"><div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${!shared&&!parent()?chatMessage({sender:'assistant',content:'いま、なにか ほしいものは ある？'}):''}${(d.messages ?? []).map(chatMessage).join('')}</div>${shared?`<section class="shared-context"><h2>${esc(d.proposalView?.product?.name||d.products?.find(p=>p.id===d.currentProposal?.productId)?.name||'そうだんするもの')}</h2><p>ほしい りゆう：${esc(d.currentProposal?.persuasionText)}</p>${d.proposalView?.negotiationResult?.reason?`<p>おうちの人の おへんじ：${esc(d.proposalView.negotiationResult.reason)}</p>`:''}</section>`:''}${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${chatProducts(d,active,shared)}${chatNextStep(d,active,shared)}</div><div class="chat-fixed-footer"><div class="chat-actions">${active&&!shared?btn('🔎 そろそろ商品を探す','search-product-now'):''}${!parent()?`<button type="button" class="btn-pill new-chat-btn" data-action="new-chat">＋ あたらしく はなす</button>`:''}</div>${active?form('message',area(messageLabel,'message','',true,messageLabel),kid('送信する','おくる')):empty(d.phase==='awaiting_response'?kid('子どもからの購入確認への返事を待っています。','おうちのひとの おへんじを まっているよ。'):d.phase==='closed'?kid('この相談は終了しました。履歴を確認できます。','この おはなしは おわったよ。'):d.phase==='negotiation'&&!shared?'つづきは、おうちのひとと いっしょに そうだんしよう。':'')}</div>`);
  $('#content').classList?.add('chat-layout-v3');
  const scroller=$('.chat-scroll-area');
  if(scroller&&backgroundEpoch!==state.epoch)scroller.scrollTop=scroller.scrollHeight;
@@ -352,7 +354,7 @@ async function action(a,id){
  if(a==='consult-proposal'){const d=await api('/proposals/'+path(id));if(!d.canConsult)throw new Error('共有交渉は開始前、回答待ち、または終了しています。');return go('#negotiation/'+d.negotiationId);}
  if(a==='search-product-now'){
   notice(kid('商品を探しています…','さがしているよ…'));
-  const detail=await api(chatPath()+'/search','POST',{
+  const detail=await chatRequest(chatPath()+'/search',{
     fromConversation:true
   });
   notice();
@@ -388,11 +390,22 @@ async function action(a,id){
  if(a==='pairing-check'){history.replaceState(null,'','#pairing');await api('/pairing/session','POST',{});return pairView(await api('/pairing/requests/'+path(state.pairingId)));}
  if(a==='pairing-complete'){state.session=await api('/pairing/requests/'+path(state.pairingId)+'/complete','POST',{});sessionStorage.removeItem('pairingRequestId');state.pairingId=null;return go('#home');}
 }
+function searchProgress(progress){
+ if(progress!=='searching'||$('#search-progress'))return;
+ const log=$('.chat-log');if(!log)return;
+ log.insertAdjacentHTML('beforeend',`<div id="search-progress" role="status">${chatMessage({sender:'assistant',content:kid('Amazonで商品を探しています。少しお待ちください。','Amazonで ほしいものを さがしているよ。ちょっと まってね。')})}</div>`);
+ const scroller=$('.chat-scroll-area');if(scroller)scroller.scrollTop=scroller.scrollHeight;
+}
+async function chatRequest(endpoint,body){
+ const epoch=state.epoch;
+ try{return await api(endpoint,'POST',body,progress=>{if(epoch===state.epoch)searchProgress(progress);});}
+ finally{$('#search-progress')?.remove();}
+}
 async function submit(name,id,f){
  if(name==='pair-respond-modal'){const code=f.confirmationCode.normalize('NFKC').trim();if(!/^[0-9]{6}$/.test(code))throw new Error('6桁の確認番号を入力してください。');return respondPairingDialog(id,'approved',code);}
  if(name==='pair-code'){await pair(f.invitationToken.trim().toUpperCase());history.replaceState(null,'','#pairing');return;}
  if(name==='child-profile'){await api('/profile','PATCH',{profile:{preferences:{interests:lines(f.interests)}}});return notice('好きなことを保存しました。');}
- if(name==='search-products')return renderChat(await api(chatPath()+'/search','POST',{query:f.query.trim()}));
+ if(name==='search-products')return renderChat(await chatRequest(chatPath()+'/search',{query:f.query.trim()}));
  if(name==='onboarding'){const payload=parent()?{displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null,onboardingCompleted:true}:{profile:{preferences:{interests:lines(f.interests),expectations:[]}},onboardingCompleted:true};await api('/profile','PATCH',payload);state.session=await api('/auth/session');return go(parent()?'#children':'#home');}
  if(name==='create-child'){const c=await api('/children','POST',{...identity(f)});state.childId=c.childId;if(c.settingsSaved===false){await go('#child-settings/'+c.childId);return notice('子どもは登録済みですが、目標の設定を保存できませんでした。この画面で設定を保存してください。再登録は不要です。',true);}try{return await action('invite',c.childId);}catch(e){await children();return notice('子どもは登録しました。端末の接続準備に失敗しました。「端末をつなぐ」から再開できます。',true);}}
  if(name==='child-info'){await api('/children/'+path(id),'PATCH',identity(f));await childSettings(id);return notice('子どもの情報を保存しました。');}
@@ -403,7 +416,7 @@ async function submit(name,id,f){
  if(name==='respond-request'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('見送る理由を書いてください。');await api('/chore-requests/'+path(id)+'/respond','POST',{decision:f.decision,reason:f.reason.trim(),...(f.decision==='approved'?{title:f.title.trim(),rewardAmountYen:amount(f.rewardAmountYen),dueAt:due(f.dueAt)}:{})});await chores();return notice('提案に返事しました。');}
  if(name==='submit-chore'){await api('/chores/'+path(id)+'/submit','POST',{note:f.note.trim()});await chores();return notice('できた！を しらせたよ。');}
  if(name==='review-chore'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('やり直してほしいことを書いてください。');await api('/chores/'+path(id)+'/review','POST',{decision:f.decision,reason:f.reason.trim()});await chores();return notice(f.decision==='approved'?'ありがとうポイントを反映しました。':'やり直しをお願いしました。');}
- if(name==='message')return renderChat(await api(chatPath()+'/messages','POST',{message:f.message.trim()}));
+ if(name==='message')return renderChat(await chatRequest(chatPath()+'/messages',{message:f.message.trim()}));
  if(name==='edit-proposal'){const saved=await api('/proposals/'+path(id),'PATCH',{version:state.proposal.proposal.version,persuasionText:f.persuasionText.trim(),purchaseConditions:[]});state.proposal=saved;state.dirty=false;return action('send-proposal',id);}
  if(name==='decide-negotiation'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('見送る理由を書いてください。');await api('/negotiations/'+path(id)+'/decision','POST',{version:state.chat.currentProposal.version,decision:f.decision,reason:f.reason.trim()||null});return negotiation(id);}
  if(name==='respond-proposal'){if(f.decision!=='approved'&&!f.reason.trim())throw new Error('理由を書いてください。');const d=await api('/proposals/'+path(id)+'/responses','POST',{version:state.proposal.proposal.version,decision:f.decision,reason:f.reason.trim()||null});if(d.canConsult)return go('#negotiation/'+d.negotiationId);await proposal(id);return notice(f.decision==='approved'?'合意して、目標に登録しました。':'理由を伝えて、今回は見送りにしました。');}

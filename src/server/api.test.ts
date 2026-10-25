@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../../frontend/api.js', import.meta.url), 'utf8');
 function client(send: (url: string, options: RequestInit) => Promise<Response>) {
   const delays: number[] = [], window: any = {};
-  vm.runInNewContext(source, { window, fetch: send, AbortSignal, setTimeout(resolve: () => void, delay: number) { delays.push(delay); resolve(); } });
+  vm.runInNewContext(source, { window, fetch: send, AbortSignal, TextDecoder, setTimeout(resolve: () => void, delay: number) { delays.push(delay); resolve(); } });
   return { api: window.API, delays };
 }
 
@@ -81,4 +81,19 @@ test('nontransient HTTP failures and invalid JSON envelopes do not loop', async 
     await assert.rejects(api.request('/auth/session'), /サーバーの応答/);
     assert.equal(attempts, 1);
   }
+});
+
+test('検索開始を受信した時点で表示し、結果を待ってからdataを返す',async()=>{
+ let finish!:(value:Uint8Array)=>void;
+ const encoder=new TextEncoder(),waiting=new Promise<Uint8Array>(resolve=>{finish=resolve;});
+ const progress:string[]=[];
+ const {api}=client(async()=>new Response(new ReadableStream({async start(controller){controller.enqueue(encoder.encode('{"progress":"searching"}\n'));controller.enqueue(await waiting);controller.close();}}),{headers:{'Content-Type':'application/x-ndjson'}}));
+ const pending=api.request('/conversations/c/messages','POST',{message:'Switch'},(event:string)=>progress.push(event));
+ await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(progress,['searching']);
+ finish(encoder.encode('{"data":{"products":[]}}\n'));
+ assert.equal((await pending).products.length,0);
+});
+test('進捗通知後のエラーも利用者向けエラーとして伝え、自動再送しない',async()=>{
+ let calls=0;const {api}=client(async()=>{calls++;return new Response('{"progress":"searching"}\n{"error":{"code":"CONFLICT","message":"状態が変わりました","status":409}}\n',{headers:{'Content-Type':'application/x-ndjson'}});});
+ await assert.rejects(api.request('/conversations/c/messages','POST',{},()=>{}),(e:any)=>e.code==='CONFLICT'&&e.status===409);assert.equal(calls,1);
 });
