@@ -5,7 +5,7 @@ import { ConversationError } from './errors.ts';
 import type { ConversationRequest } from './prompt.ts';
 import { publicUrl } from './validation.ts';
 
-export const CONVERSATION_MODEL = 'gemini-3.5-flash-lite';
+export const CONVERSATION_MODEL = 'gemini-4-argon';
 export const REQUEST_TIMEOUT_MS = 30_000;
 export interface GenerationResult {
     text: string;

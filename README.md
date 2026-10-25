@@ -112,7 +112,7 @@ flowchart LR
 ### 活用した技術
 
 #### API・データ
-* Gemini API（`gemini-3.5-flash-lite`、Google Search によるグラウンディング）
+* Gemini API（`gemini-4-argon`、Google Search によるグラウンディング）
 * Supabase（PostgreSQL・Auth）
 * Google ログイン（OAuth）
 
