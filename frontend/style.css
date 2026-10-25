@@ -1004,3 +1004,40 @@ h1[tabindex="-1"]:focus { outline: none; }
 .assistant-message .chat-message{max-width:calc(100% - 46px);min-width:0}
 .chat-message.participant{background:#f1f4fa;align-self:flex-start}
 @media(max-width:380px){.assistant-message{gap:8px}.assistant-message .message-avatar{flex-basis:30px;width:30px;height:30px}.assistant-message .chat-message{max-width:calc(100% - 38px)}}
+
+/* Keep the main menu within reach while scrolling. */
+.app:has(#navigation:not([hidden])) { padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
+#navigation {
+  position: fixed;
+  z-index: 100;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, 540px);
+  box-sizing: border-box;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 4px;
+  padding: 10px 8px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid #dcecf0;
+  border-bottom: 0;
+  background: #fff;
+  box-shadow: 0 -4px 18px #214d6510;
+}
+#navigation a { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 4px; text-align: center; font-size: 13px; }
+
+/* Demo tools must not affect the normal screen layout. */
+.demo-tools {
+  position: fixed;
+  z-index: 101;
+  top: 8px;
+  right: max(8px, calc((100vw - 540px) / 2 + 8px));
+  padding: 4px 8px;
+  border: 1px solid #dcecf0;
+  border-radius: 8px;
+  background: #fff;
+  color: #54727e;
+  font-size: 11px;
+  text-decoration: none;
+}
+.demo-tools[hidden] { display: none; }
