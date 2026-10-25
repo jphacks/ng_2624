@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createDemo, readDemoConfig } from '../../demo/app.ts';
+import { CONVERSATION_SEARCH_MESSAGE } from '../ai/prompt.ts';
 import { parseAIInput } from '../ai/validation.ts';
 import type { AIInput, AIOutput } from '../shared/types.ts';
 
@@ -13,9 +14,9 @@ test('child proposal journey, gated parent negotiation, private drafts, agreemen
   if(input.mode==='negotiation'){assert.equal(input.profile,null);assert.deepEqual(input.history,[]);assert(!JSON.stringify(input).includes('個別の秘密'));}
   if(input.message===null){
    return {requestId:input.requestId,action:input.mode==='negotiation'?'NEGOTIATION':'PROPOSAL',reply:'下書きを作成しました。内容を確認して送信してください。',search:null,
-    proposalDraft:{productId:input.selectedProductId!,target:input.role==='parent'?'child':'parent',persuasionText:input.mode==='negotiation'?'送信前の自分だけの修正下書き':'商品を目標にしたいです',purchaseConditions:['大切に使う'],basedOn:input.currentProposal?{proposalId:input.currentProposal.id,version:input.currentProposal.version}:null}} as AIOutput;
+    proposalDraft:{productId:input.selectedProductId!,target:input.role==='parent'?'child':'parent',persuasionText:input.mode==='negotiation'?'送信前の自分だけの修正下書き':'商品を目標にしたいです',purchaseConditions:[],basedOn:input.currentProposal?{proposalId:input.currentProposal.id,version:input.currentProposal.version}:null}} as AIOutput;
   }
-  if(input.message.includes('商品を探す'))return {requestId:input.requestId,action:'PRODUCT',reply:'候補です',search:null,products:[{id:randomUUID(),name:'候補商品',priceJpy:1000,size:'small',productUrl:'https://www.amazon.co.jp/dp/B000000000',sourceUrls:['https://www.amazon.co.jp/dp/B000000000'],priceCheckedAt:new Date().toISOString(),description:'商品の説明',recommendationReason:'用途に合います'}]};
+  if(input.message===CONVERSATION_SEARCH_MESSAGE||input.message.includes('商品を探す'))return {requestId:input.requestId,action:'PRODUCT',reply:'候補です',search:null,products:[{id:randomUUID(),name:'候補商品',priceJpy:1000,size:'small',productUrl:'https://www.amazon.co.jp/dp/B000000000',sourceUrls:['https://www.amazon.co.jp/dp/B000000000'],priceCheckedAt:new Date().toISOString(),description:'商品の説明',recommendationReason:'用途に合います'}]};
   return {requestId:input.requestId,action:'HEARING',reply:'条件を整理します。',search:null};
  },enrich:async p=>p,image:async()=>null,qr:async()=>''});
  function browser(){
@@ -58,7 +59,11 @@ test('child proposal journey, gated parent negotiation, private drafts, agreemen
    assert.equal(inputs.length,callsBeforeSelection);
    const repeated=await okay(child,'/conversations/'+c.conversationId+'/selected-product','PATCH',{selectedProductId:c.products[0].id});
    assert.equal(repeated.messages.length,selected.messages.length);
-   c=await okay(child,'/conversations/'+c.conversationId+'/proposal-drafts','POST',{});p=c.currentProposal;
+   c=await okay(child,'/conversations/'+c.conversationId+'/proposal-drafts','POST',{});
+   assert.equal(c.currentProposal,null);assert.equal(c.reasonConfirmed,false);assert(c.reasonSummary);
+   assert.equal((await child.call('/conversations/'+c.conversationId+'/confirm-reason','POST',{reasonSummary:'別の理由'})).status,409);
+   c=await okay(child,'/conversations/'+c.conversationId+'/confirm-reason','POST',{reasonSummary:c.reasonSummary});p=c.currentProposal;
+   assert.equal(c.reasonConfirmed,true);assert.deepEqual(p.purchaseConditions,[]);
    assert.equal((await okay(parent,'/proposals/received')).proposals.length,0);
    const sent=await okay(child,'/proposals/'+p.id+'/send','POST',{version:p.version});nId=sent.negotiationId;
    const received=(await okay(parent,'/proposals/received')).proposals;
@@ -77,28 +82,24 @@ test('child proposal journey, gated parent negotiation, private drafts, agreemen
    await okay(child,'/negotiations/'+nId+'/messages','POST',{message:'わかったよ'});
    const input=inputs.at(-1)!;assert.equal(input.negotiationHistory[0].sender,'parent');assert.equal(input.negotiationHistory[1].sender,'assistant');
   });
-  await t.test('revision remains a private author draft until explicit send',async()=>{
-   const n=await okay(parent,'/negotiations/'+nId+'/proposal-drafts','POST',{});repair=n.draftProposal;assert(repair);assert.equal(repair.version,p.version+1);
-   const other=await okay(child,'/negotiations/'+nId);assert.equal(other.draftProposal,null);assert(!JSON.stringify(other).includes('送信前の自分だけの修正下書き'));
-   assert.equal((await child.call('/proposals/'+repair.id)).status,404);
+  await t.test('only the parent can conclude shared consultation, with version and AI lease checks',async()=>{
+   assert.equal((await child.call('/negotiations/'+nId+'/decision','POST',{version:p.version,decision:'approved'})).status,403);
+   assert.equal((await parent.call('/negotiations/'+nId+'/decision','POST',{version:p.version+1,decision:'approved'})).status,409);
    const lock=randomUUID();await demo.db.rpc('wb_begin_negotiation_ai',{p_actor_id:childUser.id,p_negotiation_id:nId,p_lock_id:lock});
-   await assert.rejects(demo.db.rpc('wb_begin_negotiation_ai',{p_actor_id:childUser.id,p_negotiation_id:nId,p_lock_id:randomUUID()}),/busy/);
-   assert.equal((await parent.call('/proposals/'+repair.id+'/send','POST',{version:repair.version})).status,409);
-   assert.equal((await okay(parent,'/proposals/'+repair.id)).proposal.status,'draft');
+   assert.equal((await parent.call('/negotiations/'+nId+'/decision','POST',{version:p.version,decision:'approved'})).status,409);
    await demo.db.rpc('wb_cancel_negotiation_ai',{p_actor_id:childUser.id,p_negotiation_id:nId,p_lock_id:lock});
-   await okay(parent,'/proposals/'+repair.id+'/send','POST',{version:repair.version});
-   assert.equal((await okay(child,'/negotiations/'+nId)).phase,'awaiting_response');
-   assert.equal((await parent.call('/negotiations/'+nId+'/messages','POST',{message:'返事待ちには送れない'})).status,409);
-   assert.equal((await child.call('/proposals/'+repair.id+'/responses','POST',{version:p.version,decision:'approved'})).status,409);
-  });
-  await t.test('both approvals of the same revision create one goal and close both chats',async()=>{
-   await okay(child,'/proposals/'+repair.id+'/responses','POST',{version:repair.version,decision:'approved'});
-   await okay(child,'/proposals/'+repair.id+'/responses','POST',{version:repair.version,decision:'approved'});
-   const n=await okay(parent,'/negotiations/'+nId);assert.equal(n.phase,'closed');assert.equal(n.canMessage,false);
+   const n=await okay(parent,'/negotiations/'+nId+'/decision','POST',{version:p.version,decision:'approved'});assert.equal(n.phase,'closed');assert.equal(n.canMessage,false);
    assert.equal((await okay(child,'/conversations/'+c.conversationId)).phase,'closed');
-   for(const suffix of ['messages','proposal-drafts','selected-product'])assert.equal((await parent.call('/negotiations/'+nId+'/'+suffix,suffix==='selected-product'?'PATCH':'POST',{message:'終了後',selectedProductId:c.products[0].id})).status,409);
-   await assert.rejects(demo.db.rpc('wb_begin_negotiation_ai',{p_actor_id:childUser.id,p_negotiation_id:nId,p_lock_id:randomUUID()}),/phase/);
+   assert.equal((await parent.call('/negotiations/'+nId+'/messages','POST',{message:'終了後'})).status,409);
    assert.equal((await okay(child,'/dashboard')).goals.length,1);
+  });
+  await t.test('search-button instruction stays internal and never appears as a user message',async()=>{
+   const next=await okay(child,'/conversations','POST',{}),base='/conversations/'+next.conversationId;
+   await okay(child,base+'/start','POST',{});
+   const searched=await okay(child,base+'/search','POST',{fromConversation:true});
+   assert.equal(inputs.at(-1)!.message,CONVERSATION_SEARCH_MESSAGE);
+   assert(!JSON.stringify(searched.messages).includes(CONVERSATION_SEARCH_MESSAGE));
+   const stored=await demo.db.list('messages',{conversation_id:'eq.'+next.conversationId});assert(!stored.some(m=>m.content===CONVERSATION_SEARCH_MESSAGE));
   });
   await t.test('final decline shares the reason, closes the request, and never opens negotiation or creates a goal',async()=>{
    let next=await okay(child,'/conversations','POST',{});
@@ -106,10 +107,12 @@ test('child proposal journey, gated parent negotiation, private drafts, agreemen
    await okay(child,base+'/start','POST',{});
    next=await okay(child,base+'/messages','POST',{message:'商品を探す'});
    await okay(child,base+'/selected-product','PATCH',{selectedProductId:next.products[0].id});
-   next=await okay(child,base+'/proposal-drafts','POST',{});const draft=next.currentProposal;
+   next=await okay(child,base+'/proposal-drafts','POST',{});next=await okay(child,base+'/confirm-reason','POST',{reasonSummary:next.reasonSummary});const draft=next.currentProposal;
    const sent=await okay(child,'/proposals/'+draft.id+'/send','POST',{version:draft.version});
-   const answered=await okay(parent,'/proposals/'+draft.id+'/responses','POST',{version:draft.version,decision:'rejected',reason:'今回は購入しません'});
-   assert.equal(answered.negotiationStatus,'closed');assert.equal(answered.canConsult,false);
+   const answered=await okay(parent,'/proposals/'+draft.id+'/responses','POST',{version:draft.version,decision:'revision_requested',reason:'購入について相談したい'});
+   await okay(parent,'/negotiations/'+sent.negotiationId+'/decision','POST',{version:draft.version,decision:'rejected',reason:'今回は購入しません'});
+   const concluded=await okay(parent,'/proposals/'+draft.id);
+   assert.equal(concluded.negotiationStatus,'closed');assert.equal(concluded.canConsult,false);
    const visible=await okay(child,'/proposals/'+draft.id);
    assert.equal(visible.negotiationResult.reason,'今回は購入しません');
    assert.equal((await okay(child,base)).phase,'closed');

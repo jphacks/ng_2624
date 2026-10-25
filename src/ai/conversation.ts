@@ -30,7 +30,7 @@ export async function createReply(
             && /依頼|お願い|頼|して|したい|やりたい|干す|報告|承認|完了|登録|生成/.test(input.message)
             && !/商品|購入|買|目標|条件|ポイント|予算|提案|円/.test(input.message)) {
             return { requestId: input.requestId, action: 'HEARING', search: null,
-                reply: input.role === 'parent' ? 'お手伝いの依頼や確認は、ホームの「お手伝い」から行ってください。ぽぽとのチャットでは、商品の希望や購入条件を相談できます。' : 'お手伝いの提案や完了報告は、ホームの「お手伝い」からできるよ。ここでは、ほしいものや購入の条件を一緒に考えよう。' };
+                reply: input.role === 'parent' ? 'お手伝いの依頼や確認は、ホームの「お手伝い」から行ってください。ぽぽとのチャットでは、商品の希望や購入条件を相談できます。' : 'お手伝いの提案や完了報告は、ホームの「お手伝い」からできるよ。ここでは、ほしいものやほしい理由を一緒に考えよう。' };
         }
         // ボタンによるYesへの応答ではモデルを呼ばず、交渉を開始・改訂しない。
         // 同一提案・版への子供の送信同意と親の承認、合意確定・目標登録はBEが扱う。
@@ -63,11 +63,11 @@ export async function createReply(
                 now: input.now, constraints: input.constraints,
             }, generate, dependencies.createId ?? (() => crypto.randomUUID()), dependencies.search ?? (dependencies.generate ? generate : searchRetail));
             const consultation = found.products.length === 3
-                ? '3件の候補が見つかりました。気になるものを1つ選んでください。'
-                : found.products.length ? `${found.products.length}件の候補が見つかりました。気になるものを選ぶか、再検索できます。`
+                ? input.role === 'child' ? '3つ見つかったよ！ 気になるものをえらんでね。' : '3件の候補が見つかりました。気になるものを選んでください。'
+                : found.products.length ? input.role === 'child' ? `${found.products.length}こ見つかったよ！ 気になるものをえらんでね。` : `${found.products.length}件の候補が見つかりました。`
                 : '商品検索に接続できませんでした。もう一度検索してください。';
             if (!found.products.length) return { ...base, action: 'HEARING', search: found.search, reply: consultation };
-            return { ...base, action: 'PRODUCT', ...found, reply: `${consultation} 表示価格は検索時の参考価格です。` };
+            return { ...base, action: 'PRODUCT', ...found, reply: `${consultation} ${input.role === 'child' ? 'ねだんは変わることもあるよ。' : '表示価格は検索時の参考価格です。'}` };
         }
         const current = input.currentProposal;
         const productId = input.selectedProductId ?? current?.productId;

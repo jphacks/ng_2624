@@ -9,10 +9,10 @@ function activity(change){
  else if(!indicator.hidden){indicator.hidePopover?.();indicator.hidden=true;}
 }
 async function api(...args){
- const epoch=state.epoch;activity(1);
+ const epoch=state.epoch,foreground=backgroundEpoch!==epoch;if(args[1]&&args[1]!=='GET')viewCache.clear();if(foreground)activity(1);
  try { const result=await API.request(...args);if(epoch!==state.epoch)throw Object.assign(new Error(),{stale:true,completed:args[1]&&args[1]!=='GET'});return result; }
  catch(e){if(epoch!==state.epoch)e.stale=true;throw e;}
- finally{activity(-1);}
+ finally{if(foreground)activity(-1);}
 }
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=n=>Number(n||0).toLocaleString('ja-JP'), points=n=>num(n)+' ポイント';
@@ -33,7 +33,7 @@ const kid=(adult,child)=>parent()?adult:child;
 // Approved / rejected chores also get an icon on the child screen.
 const childChoreLabels={approved:['🎉','ごうかく！'],rejected:['😢','みおくり・さしもどし']};
 const choreLabel=v=>{const c=!parent()&&childChoreLabels[v];return c?`<span class="chore-status-icon" aria-hidden="true">${c[0]}</span>${esc(c[1])}`:esc(kidStatus(v));};
-const reloadBtn=()=>btn(parent()?'最新の状態に更新':'こうしん','reload');
+const reloadBtn=()=>'';
 const choreTone=v=>['approved','completed','paid'].includes(v)?'is-approved':['rejected','revision_requested'].includes(v)?'is-rejected':v==='submitted'?'is-waiting':'';
 const state={session:null,childId:null,dashboard:null,chat:null,proposal:null,busy:false,loading:true,canNegotiate:false,epoch:0,dirty:false,routeHash:location.hash,invitation:null,goalOrder:[],pairingId:sessionStorage.getItem('pairingRequestId')};
 const parent=()=>state.session?.user?.role==='parent';
@@ -52,7 +52,7 @@ function showPairingDialog(request){
 }
 async function checkPairingRequests(){
  if(pairingMonitor.checking||state.busy||document.visibilityState==='hidden')return;
- if(!parent()||!state.session?.authenticated||state.session.user.onboardingCompleted===false){closePairingDialog();return;}
+ if(!parent()||(!state.session?.authenticated&&!state.pairingId)||state.session?.user?.onboardingCompleted===false){closePairingDialog();return;}
  pairingMonitor.checking=true;const session=state.session;
  try{
   const data=await API.request('/pairing/requests');
@@ -72,7 +72,20 @@ async function respondPairingDialog(id,decision,confirmationCode){
  notice(decision==='approved'?'端末を承認しました。子どもの端末で「おうちの人の返事を確認」から接続を完了してください。':'接続申請を拒否しました。');
 }
 function notice(text='',error=false){$('#notice').textContent=text;$('#notice').className=error?'global-notice form-error':'global-notice';}
-function render(html){state.loading=false;state.dirty=false;$('#content').classList?.remove('chat-layout-fixed-v2','chat-layout-v3');$('#content').innerHTML=html;$('#content').setAttribute('aria-busy','false');}
+const viewCache=new Map();let cacheSession=null,backgroundEpoch=null,refreshPending=false,lastRendered=null,composing=false;
+function viewKey(){if(cacheSession!==state.session){viewCache.clear();cacheSession=state.session;}return (state.childId||'')+'|'+location.hash;}
+function rememberView(html){if(state.session?.authenticated&&html){viewCache.set(viewKey(),{html,chat:state.chat,proposal:state.proposal,dashboard:state.dashboard,chatThreads:state.chatThreads,canNegotiate:state.canNegotiate});if(viewCache.size>24)viewCache.delete(viewCache.keys().next().value);}}
+function captureView(){
+ const content=$('#content'),fields=[...(content.querySelectorAll?.('input,textarea,select')||[])];
+ const key=e=>{const f=e.closest?.('form');return [f?.dataset.form||'',f?.dataset.id||'',e.name||e.id].join('|');};
+ const values=new Map(fields.map(e=>[key(e),{value:e.value,checked:e.checked,focused:document.activeElement===e,start:e.selectionStart,end:e.selectionEnd}]));
+ const scroll=[...(content.querySelectorAll?.('.chat-scroll-area,textarea')||[])].map(e=>({top:e.scrollTop,left:e.scrollLeft}));
+ const details=[...(content.querySelectorAll?.('details')||[])].map(e=>e.open),dirty=state.dirty,top=window.scrollY,left=window.scrollX;
+ return ()=>{for(const e of content.querySelectorAll?.('input,textarea,select')||[]){const v=values.get(key(e));if(!v)continue;e.value=v.value;if(v.checked!==undefined)e.checked=v.checked;if(v.focused){e.focus?.({preventScroll:true});if(typeof v.start==='number'&&e.setSelectionRange){try{e.setSelectionRange(v.start,v.end);}catch{}}}}
+ [...(content.querySelectorAll?.('details')||[])].forEach((e,i)=>{if(details[i]!==undefined)e.open=details[i];});
+ [...(content.querySelectorAll?.('.chat-scroll-area,textarea')||[])].forEach((e,i)=>{if(scroll[i]){e.scrollTop=scroll[i].top;e.scrollLeft=scroll[i].left;}});state.dirty=dirty;window.scrollTo?.({left,top,behavior:'instant'});};
+}
+function render(html){const content=$('#content'),preserve=backgroundEpoch===state.epoch;if(preserve&&composing)return;const restore=preserve?captureView():null;state.loading=false;if(!preserve)state.dirty=false;content.classList?.remove('chat-layout-fixed-v2','chat-layout-v3');if(lastRendered!==html||!preserve)content.innerHTML=html;lastRendered=html;content.setAttribute('aria-busy','false');restore?.();rememberView(html);}
 function loading(){render('');state.loading=true;$('#content').setAttribute('aria-busy','true');}
 function nav(){ if(!parent())closePairingDialog();const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=navLink('#home','home','ホーム')+(!parent()||state.canNegotiate?navLink('#conversations','chat',parent()?'親子で相談':'ぽぽにそうだん'):'')+navLink('#settings','gear',parent()?'設定':'じぶんの設定'); }
 // Line icons for the bottom bar: house, hand, speech bubble, gear.
@@ -85,7 +98,7 @@ const navIcons={
 const navLink=(href,icon,text)=>`<a href="${href}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${navIcons[icon]}</svg><span>${esc(text)}</span></a>`;
 function product(p,action=''){
  if(!p)return '';const src=image(p.imageUrl)||(p.id?'/api/products/'+encodeURIComponent(p.id)+'/image':''),target=url(p.productUrl);
- return `<article class="product-card"><div class="product-visual">${src?`<img class="product-image" src="${esc(src)}" alt="${esc(p.name)}" loading="lazy" referrerpolicy="no-referrer"><span class="image-fallback" hidden>${kid('画像を取得できません','しゃしんを ひょうじできません')}</span>`:`<span class="image-fallback">${kid('画像を取得できません','しゃしんを ひょうじできません')}</span>`}</div><div class="product-info"><h3 class="product-name">${esc(p.name)}</h3><p class="product-price">${p.priceJpy==null?kid('価格未確認','ねだんは まだ かくにんできていません'):num(p.priceJpy)+'円'}</p>${parent()&&target?`<a class="product-link" href="${esc(target)}" target="_blank" rel="noopener noreferrer">出典で確認 ↗</a>`:''}${action?btn('この商品を選ぶ',action,p.id):''}</div></article>`;
+ return `<article class="product-card"><div class="product-visual">${src?`<img class="product-image" src="${esc(src)}" alt="${esc(p.name)}" loading="lazy" referrerpolicy="no-referrer"><span class="image-fallback" hidden>${kid('画像を取得できません','しゃしんを ひょうじできません')}</span>`:`<span class="image-fallback">${kid('画像を取得できません','しゃしんを ひょうじできません')}</span>`}</div><div class="product-info"><h3 class="product-name">${esc(p.name)}</h3><p class="product-price">${p.priceJpy==null?kid('価格未確認','ねだんは まだ かくにんできていません'):num(p.priceJpy)+'円'}</p>${parent()&&target?`<a class="product-link" href="${esc(target)}" target="_blank" rel="noopener noreferrer">出典で確認 ↗</a>`:''}${action?btn(kid('この商品を選ぶ','これにする'),action,p.id):''}</div></article>`;
 }
 function welcome(){nav();render(`<div class="welcome"><span class="welcome-label">きみの「できた！」が、羽ばたく。</span><div class="welcome-dove dove" aria-hidden="true"></div><h1 class="tagline">がんばりと「ほしい」を、<br>親子でつなぐ。</h1></div><div class="start-actions"><a class="btn-start btn-start-parent login-link" href="/api/auth/google/start">🏡 Googleで保護者ログイン</a><details><summary>🌱 子どもの端末をつなぐ</summary><p>おうちの人から招待コードを受け取るか、招待QRを読み取ってください。</p>${form('pair-code',field('招待コード','invitationToken','','text',true),'接続をお願いする')}</details>${state.pairingId?btn('接続申請の続きを確認','pairing-check'):''}</div>`);}
 function selector(children){return children?.length?`<label class="field-label">子ども<select id="child-selector">${children.map(c=>`<option value="${esc(c.childId)}" ${c.childId===state.childId?'selected':''}>${esc(c.displayName)}</option>`).join('')}</select></label>`:'';}
@@ -107,7 +120,7 @@ function proposalStatus(v){
  const p=v.proposal;
  if(p.status==='agreed')return kid('目標に登録済み','もくひょうになったよ！');
  if(v.negotiationStatus==='closed')return kid('今回は見送り','こんかいは みおくり');
- if(v.canConsult)return kid('条件を相談中','やくそくを そうだんちゅう');
+ if(v.canConsult)return kid('購入について相談中','かうか そうだんちゅう');
  if(p.status==='pending')return v.canRespond?kid('返事をしてください','へんじを してね'):kid('相手の返事待ち','おうちのひとの へんじまち');
  return kidStatus(p.status);
 }
@@ -124,21 +137,21 @@ async function requests(){
  render(`<a class="back-link" href="#home">← ホーム</a><h1>${kid('届いたおねがい','おねがいと おへんじ')}</h1>${proposalCards(list)}${reloadBtn()}`);
 }
 function chatProducts(d,active,shared){
- if(!d.products?.length)return '';
- const candidates=`<section class="product-list">${d.products.map(p=>product(p,active?'select-product':'')).join('')}</section>`;
+ if(!d.products?.length||shared)return '';
  const selected=d.products.find(p=>p.id===d.selectedProductId);
- if(!selected||shared)return candidates;
- return `<section class="flow-card"><h2>${kid('選んだ商品','えらんだ しょうひん')}</h2>${product(selected)}<p>${d.phase==='consultation'?'ほしい理由とやくそくを、ぽぽといっしょに考えよう。':''}</p></section>${active?`<details><summary>別の商品を選び直す</summary>${candidates}</details>`:''}`;
+ const candidates=`<section class="product-list">${d.products.map(p=>product(p,active?'select-product':'')).join('')}</section>`;
+ return selected?`<details class="selected-product-details"><summary>えらんだものを みなおす・えらびなおす</summary>${candidates}</details>`:candidates;
 }
 function chatNextStep(d,active,shared){
- if(shared)return `${active&&d.selectedProductId?btn('話し合った条件で修正案を作る','generate-proposal'):''}${d.draftProposal?btn('修正案を確認して相手に送る','proposal',d.draftProposal.id):''}${d.currentProposal?btn('対象のおねがいを確認する','proposal',d.currentProposal.id):''}`;
+ if(shared)return parent()&&active?form('decide-negotiation',`<label class="field-label">相談の結論<select name="decision"><option value="approved">購入をOKする</option><option value="rejected">今回は見送る</option></select></label>${area('ひとこと（見送るときは理由を書いてください）','reason')}`,'この結論を伝える',d.negotiationId):'';
  const p=d.currentProposal,matching=p&&p.productId===d.selectedProductId;
- if(p&&p.status!=='draft')return btn('おねがいと返事を確認する','proposal',p.id);
- if(matching)return `<section class="flow-card"><h2>おねがいの下書きができたよ</h2><p>内容を確認してから、おうちの人に送ろう。まだ送られていないよ。</p>${btn('おねがいを確認する','proposal',p.id)}</section>`;
- return active&&d.selectedProductId?`<p>ほしい理由とやくそくが決まったら、おねがいを作ろう。</p>${btn('話した内容でおねがいを作る','generate-proposal')}`:'';
+ if(p&&p.status!=='draft')return btn('おねがいと おへんじを みる','proposal',p.id);
+ if(d.reasonSummary&&!d.reasonConfirmed)return `<section class="reason-confirmation">${btn('そう！ このりゆうでOK','confirm-reason')}<p>ちがうときは、ぽぽに おしえてね。</p></section>`;
+ if(matching&&d.reasonConfirmed)return `<section class="flow-card"><p>おうちのひとに おくるものを かくにんしよう。</p>${btn('おくるまえに かくにんする','proposal',p.id)}</section>`;
+ return '';
 }
 async function conversations(){
- if(parent()){const list=await receivedProposals();render('<h1>親子とぽぽで相談</h1><p>子どもから届いたおねがいで、条件を相談するときに使えます。</p>'+proposalCards(list.filter(v=>v.canConsult))+`<a class="btn-pill" href="#requests">届いたおねがいを確認する</a>${reloadBtn()}`);return;}
+ if(parent()){const list=await receivedProposals();render('<h1>親子とぽぽで相談</h1><p>購入について相談するおねがいを選んでください。</p>'+proposalCards(list.filter(v=>v.canConsult))+`<a class="btn-pill" href="#requests">届いたおねがいを確認する</a>${reloadBtn()}`);return;}
  const children=[];
 
  const [d,n]=await Promise.all([
@@ -159,7 +172,6 @@ async function conversations(){
 
  if(latest){
   const id=encodeURIComponent(latest.conversationId);
-  const detail=await api('/conversations/'+id);
   return chat(latest.conversationId);
  }
 
@@ -212,13 +224,14 @@ function chatMessage(m){
 function renderChat(d){
  state.chat=d;
  const shared=d.mode==='negotiation', active=d.canMessage===true;
- const intro=shared?'ぽぽです。ここでは、この商品の購入条件を親子で話し合います。ここへの発言と返答は親子に公開されます。個別相談の履歴は共有しません。':parent()?'ぽぽです。お子さんの目標に関する購入条件を一緒に整理します。この個別相談はあなたにだけ表示されます。':'ぽぽだよ。ほしいものや、その理由を一緒に整理しよう。この個別相談はあなたにだけ見えるよ。';
+ const intro=shared?'ここでは、おうちの人といっしょに、この商品を買ってよいか相談しよう。ぽぽが話を整理するよ。ここでのお話は親子で見られるよ。':parent()?'ぽぽです。お子さんの目標に関する購入条件を一緒に整理します。この個別相談はあなたにだけ表示されます。':'ぽぽだよ。ほしいものや、その理由を一緒に整理しよう。この個別相談はあなたにだけ見えるよ。';
  // The composer label is visually hidden, so the same text is shown as a placeholder.
  const messageLabel=shared?kid('親子に公開するメッセージ','おうちのひとにも みえる メッセージ'):'ぽぽへのメッセージ';
- render(`${parent()&&state.chatThreads?.children?.length?`<div class="chat-child-toggle" role="group" aria-label="子どもを選択">${state.chatThreads.children.map(c=>`<button type="button" data-action="select-chat-child" data-id="${esc(c.childId)}" aria-pressed="${c.childId===state.childId}">${esc(c.displayName)}</button>`).join('')}</div>`:''}<div class="chat-scroll-area"><div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${(d.messages ?? []).map(chatMessage).join('')}</div>${shared&&d.proposalView?.negotiationResult?.reason?`<p class="flow-card">No・修正依頼の理由：${esc(d.proposalView.negotiationResult.reason)}</p>`:''}${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${chatProducts(d,active,shared)}${chatNextStep(d,active,shared)}</div><div class="chat-fixed-footer"><div class="chat-actions">${active&&!shared?btn('🔎 そろそろ商品を探す','search-product-now'):''}${!parent()?`<button type="button" class="btn-pill new-chat-btn" data-action="new-chat">＋ あたらしく はなす</button>`:''}</div>${active?form('message',area(messageLabel,'message','',true,messageLabel),'送信する'):empty(d.phase==='awaiting_response'?'相手の返事を待っています。このフェーズではメッセージを送れません。':d.phase==='closed'?'この相談・交渉は終了しました。履歴だけ確認できます。':d.phase==='negotiation'&&!shared?'個別相談は終了しました。続きは共有交渉で話し合ってください。':'')}</div>`);
+ const selected=d.products?.find(p=>p.id===d.selectedProductId);
+ render(`${selected?`<div class="chat-selected-title">${esc(selected.name)}</div>`:''}${parent()&&state.chatThreads?.children?.length?`<div class="chat-child-toggle" role="group" aria-label="子どもを選択">${state.chatThreads.children.map(c=>`<button type="button" data-action="select-chat-child" data-id="${esc(c.childId)}" aria-pressed="${c.childId===state.childId}">${esc(c.displayName)}</button>`).join('')}</div>`:''}<div class="chat-scroll-area"><div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${(d.messages ?? []).map(chatMessage).join('')}</div>${shared?`<section class="shared-context"><h2>${esc(d.proposalView?.product?.name||d.products?.find(p=>p.id===d.currentProposal?.productId)?.name||'そうだんするもの')}</h2><p>ほしい りゆう：${esc(d.currentProposal?.persuasionText)}</p>${d.proposalView?.negotiationResult?.reason?`<p>おうちの人の おへんじ：${esc(d.proposalView.negotiationResult.reason)}</p>`:''}</section>`:''}${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${chatProducts(d,active,shared)}${chatNextStep(d,active,shared)}</div><div class="chat-fixed-footer"><div class="chat-actions">${active&&!shared?btn('🔎 そろそろ商品を探す','search-product-now'):''}${!parent()?`<button type="button" class="btn-pill new-chat-btn" data-action="new-chat">＋ あたらしく はなす</button>`:''}</div>${active?form('message',area(messageLabel,'message','',true,messageLabel),kid('送信する','おくる')):empty(d.phase==='awaiting_response'?kid('子どもからの購入確認への返事を待っています。','おうちのひとの おへんじを まっているよ。'):d.phase==='closed'?kid('この相談は終了しました。履歴を確認できます。','この おはなしは おわったよ。'):d.phase==='negotiation'&&!shared?'つづきは、おうちのひとと いっしょに そうだんしよう。':'')}</div>`);
  $('#content').classList?.add('chat-layout-v3');
  const scroller=$('.chat-scroll-area');
- if(scroller)scroller.scrollTop=scroller.scrollHeight;
+ if(scroller&&backgroundEpoch!==state.epoch)scroller.scrollTop=scroller.scrollHeight;
 }
 async function chat(id){
  if(parent())return conversations();
@@ -231,31 +244,46 @@ async function negotiation(id){renderChat(await api('/negotiations/'+encodeURICo
 async function proposal(id){
  const v=await api('/proposals/'+encodeURIComponent(id)),p=v.proposal;state.proposal=v;
  if(parent()&&v.canConsult){state.canNegotiate=true;nav();}
- const prod=v.product||state.chat?.products?.find(x=>x.id===p.productId)||state.dashboard?.proposals?.find(x=>x.proposal.id===id)?.product;
+ const prod=v.product||state.chat?.products?.find(x=>x.id===p.productId);
  const draft=p.status==='draft'&&v.canEdit!==false;
- render(`<a class="back-link" href="#requests">← ${kid('届いたおねがい','おねがいと おへんじ')}</a><h1>${draft?kid('修正案を確認する','おねがいを かくにんしよう'):kid('子どもからのおねがい','おねがいと おへんじ')}</h1>${product(prod)}<p>${esc(proposalStatus(v))}</p>${draft?`<p>ここにある商品・理由・やくそくだけを相手に送ります。ぽぽとの個別の会話は共有しません。</p>${form('edit-proposal',area(kid('提案する理由','ほしい りゆう'),'persuasionText',p.persuasionText,true)+area(kid('購入の条件（1行に1つ）','やくそく（1ぎょうに 1つ）'),'purchaseConditions',p.purchaseConditions.join('\n'),true),kid('この修正案を相手に送る','おうちの人に相談する'),p.id)}<a class="btn-pill" href="${v.negotiationId?'#negotiation/'+v.negotiationId:'#conversations'}">ぽぽともう少し考える</a>`:`<div class="review-text">${esc(p.persuasionText)}</div><ul>${p.purchaseConditions.map(c=>`<li>${esc(c)}</li>`).join('')}</ul>`}${p.status==='pending'&&v.canRespond?form('respond-proposal',`<label>おねがいへの返事<select name="decision"><option value="approved">OK・この条件で目標にする</option><option value="revision_requested">条件を相談したい</option><option value="rejected">今回は見送る</option></select></label>${area('理由・相談したい条件（相談・見送りでは必須）','reason')}`,'この返事を伝える',p.id):''}${v.negotiationResult?.reason?`<p class="flow-card">${kid('返事の理由','おうちのひとの おへんじ')}：${esc(v.negotiationResult.reason)}</p>`:''}${v.canConsult?btn(kid('親子とぽぽで条件を相談する','おうちのひとと そうだんする'),'consult-proposal',p.id):''}${p.status==='agreed'?'<p>この内容で合意して、目標に登録しました。</p><a class="btn-primary" href="#home">ホームで目標を見る</a>':''}${v.negotiationStatus==='closed'?'<p>今回は見送りになりました。このおねがいの相談は終了しています。</p><a class="btn-pill" href="#home">ホームへ戻る</a>':''}`);
+ render(`<a class="back-link" href="${draft?'#conversations':'#home'}">← ${kid('戻る','もどる')}</a><h1>${draft?'おくるまえに かくにんしよう':kid('子どもからのおねがい','おねがいと おへんじ')}</h1>${product(prod)}<p>${esc(proposalStatus(v))}</p><section class="review-text"><h2>${kid('ほしい理由','ほしい りゆう')}</h2><p>${esc(p.persuasionText)}</p></section>${draft?`<p>この商品と理由を送って、買ってよいか確認するよ。ぽぽとの個別の会話は共有しません。</p>${btn('おうちのひとに おくる','send-proposal',p.id)}<a class="btn-pill" href="#conversations">ぽぽと もうすこし はなす</a>`:''}${p.status==='pending'&&v.canRespond?form('respond-proposal',`<p>お手伝いでポイントを貯めて、この商品を買ってよいですか？</p><label class="field-label">購入への返事<select name="decision"><option value="approved">OK・目標に登録する</option><option value="revision_requested">まだOKできない・親子で相談する</option></select></label>${area('OKできない理由・相談したいこと','reason')}`,'この返事を伝える',p.id):''}${v.negotiationResult?.reason?`<p class="flow-card">${kid('返事の理由','おうちのひとの おへんじ')}：${esc(v.negotiationResult.reason)}</p>`:''}${v.canConsult?btn(kid('親子とぽぽで相談する','おうちのひとと そうだんする'),'consult-proposal',p.id):''}${p.status==='agreed'?'<p>目標に登録しました。お手伝いでポイントを貯めていこう。</p><a class="btn-primary" href="#home">ホームで目標を見る</a>':''}${v.negotiationStatus==='closed'?'<p>今回は見送りになりました。</p><a class="btn-pill" href="#home">ホームへ戻る</a>':''}`);
 }
 
 const gender=(value=null)=>`<label class="field-label">性別<select name="gender"><option value="">回答しない</option><option value="male" ${value==='male'?'selected':''}>男性</option><option value="female" ${value==='female'?'selected':''}>女性</option><option value="other" ${value==='other'?'selected':''}>その他</option></select></label>`;
 const gradeLabel=n=>!n?'未設定':n<=6?'小学'+n+'年':n<=9?'中学'+(n-6)+'年':'高校'+(n-9)+'年';
 const grade=(value='')=>`<label class="field-label">学年<select name="gradeLevel"><option value="">未就学・未設定</option>${Array.from({length:12},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===Number(value)?'selected':''}>${gradeLabel(n)}</option>`).join('')}</select></label>`;
 function childFields(c={}){return field('ニックネーム','displayName',c.displayName||'','text',true)+field('誕生日','birthDate',c.birthDate||'','date',true)+gender(c.gender)+grade(c.gradeLevel);}
-async function onboarding(){const p=await api('/profile');render(`<h1>はじめまして</h1><p>${parent()?'保護者の情報を入力してください。':'好きなことを、ぽぽに教えてね。名前はおうちの人が登録しています。'}</p>${form('onboarding',parent()?field('お名前','displayName',p.displayName,'text',true)+field('誕生日','birthDate',p.birthDate||'','date',true)+gender(p.profile?.gender)+area('お願いしたいお手伝い（1行に1つ）','chorePreferences',(p.chorePreferences||[]).join('\n')):area('好きなこと（1行に1つ）','interests',(p.profile?.preferences?.interests||[]).join('\n'),true)+area('ほしいもの（1行に1つ）','wishes',(p.profile?.preferences?.wishes||[]).join('\n')),'はじめる')}`);}
-async function children(){if(!parent())return home();const [d,received]=await Promise.all([api('/children'),receivedProposals()]);render(`<section><h1>届いたおねがい</h1>${proposalCards(received)}${reloadBtn()}</section><h1>子ども一覧</h1>${d.children.map(c=>`<article class="flow-card"><h2>${esc(c.displayName)}</h2><p>${esc(gradeLabel(c.gradeLevel))}</p>${btn('目標・お手伝いを確認','child-home',c.childId)}${btn('情報・購入条件を変更','child-settings',c.childId)}${btn('端末をつなぐ招待を作る','invite',c.childId)}</article>`).join('')||empty('子どもを登録して、はじめましょう。')}<details ${d.children.length?'':'open'}><summary>＋ 子どもを登録する</summary>${form('create-child',childFields()+area('お願いしたいお手伝い（1行に1つ）','chorePreferences'),'登録する')}</details>`);}
-async function childSettings(id){const [list,s]=await Promise.all([api('/children'),api('/children/'+encodeURIComponent(id)+'/settings')]);const c=list.children.find(x=>x.childId===id);if(!c)throw new Error('子どもが見つかりません。');render(`<a href="#children">← 子ども一覧</a><h1>${esc(c.displayName)}の設定</h1>${form('child-info',childFields(c),'子どもの情報を保存',id)}${form('child-settings',area('購入の条件（1行に1つ）','mustHave',(s.constraints?.mustHave||[]).join('\n'))+area('避けたいもの（1行に1つ）','mustAvoid',(s.constraints?.mustAvoid||[]).join('\n'))+area('お願いしたいお手伝い（1行に1つ）','chorePreferences',(s.chorePreferences||[]).join('\n')),'条件を保存',id)}`);}
-async function settings(){if(!parent()){const p=await api('/profile');return render(`<h1>じぶんの設定</h1><p>${esc(p.displayName)}の好きなことを更新できるよ。</p>${form('child-profile',area('好きなこと（1行に1つ）','interests',(p.profile?.preferences?.interests||[]).join('\n'))+area('ほしいもの（1行に1つ）','wishes',(p.profile?.preferences?.wishes||[]).join('\n')),'保存する')}`);}const [p,devices,pairs]=await Promise.all([api('/profile'),api('/devices'),api('/pairing/requests')]);render(`<h1>保護者の設定</h1>${form('profile',field('お名前','displayName',p.displayName,'text',true)+field('誕生日','birthDate',p.birthDate||'','date',true)+gender(p.profile?.gender)+area('お願いしたいお手伝い（1行に1つ）','chorePreferences',(p.chorePreferences||[]).join('\n')))}<section><h2>子どもの端末の接続申請</h2><p>子どもの端末に表示された確認番号を確認してください。</p>${pairs.requests.map(r=>`<article class="flow-card"><h3>${esc(r.childDisplayName)}</h3><p>子どもの端末 ・${esc(status(r.status))}</p>${r.status==='pending'?form('pair-respond',`<label>返事<select name="decision"><option value="approved">この端末を承認する</option><option value="rejected">拒否する</option></select></label>${field('子どもの画面の6桁の確認番号','confirmationCode')}`,'返事する',r.pairingRequestId):''}</article>`).join('')||empty('接続申請はありません。')}${btn('更新','reload')}</section><section><h2>接続中の端末</h2>${devices.devices.map(d=>`<article class="flow-card"><h3>${d.childDisplayName?esc(d.childDisplayName)+'：':''}${esc(d.deviceLabel)}${d.isCurrent?'（この端末）':''}</h3><p>${esc(date(d.lastActiveAt))}</p>${d.isCurrent?btn('この端末からログアウト','logout'):btn('この接続を解除','revoke-device',d.deviceSessionId)}</article>`).join('')}</section>`);}
-function invitation(id){const d=state.invitation;if(!d||d.childId!==id)return render(`<a href="#children">← 子ども一覧</a><p>招待を表示するには、子ども一覧から招待を発行してください。</p>`);const src=typeof d.qrDataUrl==='string'&&d.qrDataUrl.startsWith('data:image/png;base64,')?d.qrDataUrl:'';render(`<a href="#children">← 子ども一覧</a><h1>子どもの端末をつなぐ</h1><p>子どもの端末でQRを読み取るか、最初の画面で招待コードを入力してください。</p>${src?`<img class="pair-qr" src="${esc(src)}" alt="子どもの端末で読み取る招待QR">`:''}<p class="confirmation-code">${esc(d.invitationToken)}</p><p>期限：${esc(date(d.expiresAt))}</p><p>接続申請が届くと、確認番号を入力する画面が自動で開きます。子どもの画面の番号を入力して承認してください。</p><a class="btn-pill" href="#settings">接続申請を確認する</a>`);}
+async function onboarding(){const p=await api('/profile');render(`<h1>はじめまして</h1><p>${parent()?'保護者の情報を入力してください。':'好きなことを、ぽぽに教えてね。名前はおうちの人が登録しています。'}</p>${form('onboarding',parent()?field('お名前','displayName',p.displayName,'text',true)+field('誕生日','birthDate',p.birthDate||'','date',true)+gender(p.profile?.gender):area('好きなこと（1行に1つ）','interests',(p.profile?.preferences?.interests||[]).join('\n'),true),'はじめる')}`);}
+async function children(){if(!parent())return home();const [d,received]=await Promise.all([api('/children'),receivedProposals()]);render(`<section><h1>届いたおねがい</h1>${proposalCards(received)}${reloadBtn()}</section><h1>子ども一覧</h1>${d.children.map(c=>`<article class="flow-card"><h2>${esc(c.displayName)}</h2><p>${esc(gradeLabel(c.gradeLevel))}</p>${btn('目標・お手伝いを確認','child-home',c.childId)}${btn('情報・購入条件を変更','child-settings',c.childId)}${c.hasLinkedDevice===undefined?'':`<p>${c.hasLinkedDevice?'端末接続済み':'端末未接続'}</p>`}${c.hasLinkedDevice?'':btn('端末をつなぐ','invite',c.childId)}</article>`).join('')||empty('子どもを登録して、はじめましょう。')}<details ${d.children.length?'':'open'}><summary>＋ 子どもを登録する</summary>${form('create-child',childFields(),'登録する')}</details>`);}
+async function childSettings(id){const [list,s]=await Promise.all([api('/children'),api('/children/'+encodeURIComponent(id)+'/settings')]);const c=list.children.find(x=>x.childId===id);if(!c)throw new Error('子どもが見つかりません。');render(`<a href="#children">← 子ども一覧</a><h1>${esc(c.displayName)}の設定</h1>${form('child-info',childFields(c),'子どもの情報を保存',id)}${form('child-settings',area('購入の条件（1行に1つ）','mustHave',(s.constraints?.mustHave||[]).join('\n'))+area('避けたいもの（1行に1つ）','mustAvoid',(s.constraints?.mustAvoid||[]).join('\n')),'条件を保存',id)}${btn('端末をつなぎ直す','invite',id)}`);}
+async function settings(){if(!parent()){const p=await api('/profile');return render(`<h1>じぶんの設定</h1><p>${esc(p.displayName)}の好きなことを更新できるよ。</p>${form('child-profile',area('好きなこと（1行に1つ）','interests',(p.profile?.preferences?.interests||[]).join('\n')),'保存する')}`);}const [p,devices,pairs]=await Promise.all([api('/profile'),api('/devices'),api('/pairing/requests')]);render(`<h1>保護者の設定</h1>${form('profile',field('お名前','displayName',p.displayName,'text',true)+field('誕生日','birthDate',p.birthDate||'','date',true)+gender(p.profile?.gender))}<section><h2>子どもの端末の接続申請</h2><p>子どもの端末に表示された確認番号を確認してください。</p>${pairs.requests.map(r=>`<article class="flow-card"><h3>${esc(r.childDisplayName)}</h3><p>子どもの端末 ・${esc(status(r.status))}</p>${r.status==='pending'?form('pair-respond',`<label>返事<select name="decision"><option value="approved">この端末を承認する</option><option value="rejected">拒否する</option></select></label>${field('子どもの画面の6桁の確認番号','confirmationCode')}`,'返事する',r.pairingRequestId):''}</article>`).join('')||empty('接続申請はありません。')}</section><section><h2>接続中の端末</h2>${devices.devices.map(d=>`<article class="flow-card"><h3>${d.childDisplayName?esc(d.childDisplayName)+'：':''}${esc(d.deviceLabel)}${d.isCurrent?'（この端末）':''}</h3><p>${esc(date(d.lastActiveAt))}</p>${d.isCurrent?btn('この端末からログアウト','logout'):btn('この接続を解除','revoke-device',d.deviceSessionId)}</article>`).join('')}</section>`);}
+function invitation(id){const d=state.invitation;if(!d||d.childId!==id)return render(`<a href="#children">← 子ども一覧</a><p>招待を表示するには、子ども一覧から招待を発行してください。</p>`);if(d.connected)return render('<h1>端末の接続が完了しました</h1><p>子どもの端末で、ぽぽとの相談を始められます。</p><a class="btn-primary" href="#children">子ども一覧へ</a>');const src=typeof d.qrDataUrl==='string'&&d.qrDataUrl.startsWith('data:image/png;base64,')?d.qrDataUrl:'';render(`<a href="#children">← 子ども一覧</a><h1>子どもの端末をつなぐ</h1><p>子どもの端末でQRを読み取るか、最初の画面で招待コードを入力してください。</p>${src?`<img class="pair-qr" src="${esc(src)}" alt="子どもの端末で読み取る招待QR">`:''}<p class="confirmation-code">${esc(d.invitationToken)}</p><p>期限：${esc(date(d.expiresAt))}</p><p>接続申請が届くと、確認番号を入力する画面が自動で開きます。子どもの画面の番号を入力して承認してください。</p><a class="btn-pill" href="#settings">接続申請を確認する</a>`);}
 async function pair(token){if(state.session?.authenticated)throw new Error('ログイン中です。子どもの別端末または別ブラウザーで招待を開いてください。');token=token.normalize('NFKC').replace(/[\s-]/g,'').toUpperCase();if(!/^[A-Z2-9]{12}$/.test(token))throw new Error('招待コードは12文字の英数字です。6桁の確認番号とは異なります。');await api('/pairing/session','POST',{invitationToken:token});const p=await api('/pairing/requests','POST',{invitationToken:token});state.pairingId=p.pairingRequestId;sessionStorage.setItem('pairingRequestId',p.pairingRequestId);pairView(p);}
-function pairView(p){render(`<h1>おうちの人に確認してもらおう</h1><p>${esc(p.childDisplayName)}の端末として接続します。</p><p class="confirmation-code">${esc(p.confirmationCode)}</p><p>① おうちの人の画面に出る確認画面で、この6桁の番号を入力して承認してもらいます。<br>② 下のボタンで返事を確認し、「接続を完了する」を押してください。</p><p>${esc(status(p.status))} ・期限 ${esc(date(p.expiresAt))}</p>${p.status==='approved'?btn('接続を完了する','pairing-complete'):p.status==='pending'?btn('おうちの人の返事を確認','pairing-check'):'<a href="#start">新しい招待ではじめる</a>'}`);}
-async function route(){notice();nav();if(!state.session?.authenticated){if(state.pairingId&&location.hash==='#pairing'){await api('/pairing/session','POST',{});return pairView(await api('/pairing/requests/'+encodeURIComponent(state.pairingId)));}return welcome();}if(state.session.user.onboardingCompleted===false)return onboarding();const [view,id]=location.hash.slice(1).split('/');if(view==='requests')return requests();if(view==='chores')return chores();if(view==='conversations')return conversations();if(view==='conversation'&&id)return chat(id);if(view==='negotiation'&&id)return negotiation(id);if(view==='proposal'&&id)return proposal(id);if(view==='child-home'&&id&&parent()){if(state.childId!==id)state.goalOrder=[];state.childId=id;return home();}if(view==='children')return children();if(view==='child-settings'&&id&&parent())return childSettings(id);if(view==='settings')return settings();if(view==='invitation'&&id&&parent())return invitation(id);return parent()?children():home();}
+function pairView(p){render(`<h1>おうちの人に確認してもらおう</h1><p>${esc(p.childDisplayName)}の端末として接続します。</p><p class="confirmation-code">${esc(p.confirmationCode)}</p><p>① おうちの人の画面に出る確認画面で、この6桁の番号を入力して承認してもらいます。<br>② おへんじは じどうで とどくよ。「せつぞくを おわる」を おしてね。</p><p>${esc(status(p.status))} ・期限 ${esc(date(p.expiresAt))}</p>${p.status==='approved'?btn('せつぞくを おわる','pairing-complete'):p.status==='pending'?'<p>おうちのひとの おへんじを まっているよ…</p>':'<a href="#start">新しい招待ではじめる</a>'}`);}
+async function route(){if(backgroundEpoch!==state.epoch)notice();nav();if(!state.session?.authenticated){if(state.pairingId&&location.hash==='#pairing'){await api('/pairing/session','POST',{});return pairView(await api('/pairing/requests/'+encodeURIComponent(state.pairingId)));}return welcome();}if(state.session.user.onboardingCompleted===false)return onboarding();const [view,id]=location.hash.slice(1).split('/');if(view==='requests')return requests();if(view==='chores')return chores();if(view==='conversations')return conversations();if(view==='conversation'&&id)return chat(id);if(view==='negotiation'&&id)return negotiation(id);if(view==='proposal'&&id)return proposal(id);if(view==='child-home'&&id&&parent()){if(state.childId!==id)state.goalOrder=[];state.childId=id;return home();}if(view==='children')return children();if(view==='child-settings'&&id&&parent())return childSettings(id);if(view==='settings')return settings();if(view==='invitation'&&id&&parent())return invitation(id);return parent()?children():home();}
 function canLeave(){return !state.dirty||confirm('提案の編集内容が未保存です。保存せず移動しますか？');}
 async function go(hash){if(!canLeave())return;history.pushState(null,'',hash);return navigate();}
-async function navigate(preserveScroll=false){state.routeHash=location.hash;const epoch=++state.epoch,position=preserveScroll?{left:window.scrollX,top:window.scrollY,behavior:'instant'}:null;if(!preserveScroll)loading();try{if(!state.session)await initialize();else await route();if(position&&epoch===state.epoch)window.scrollTo(position);}catch(e){if(!e.stale)await error(e);}}
+async function navigate(preserveScroll=false){
+ state.routeHash=location.hash;const epoch=++state.epoch; backgroundEpoch=null;
+ const position=preserveScroll?{left:window.scrollX,top:window.scrollY,behavior:'instant'}:null;if(!preserveScroll)window.scrollTo?.({left:0,top:0,behavior:'instant'});
+ const cached=!preserveScroll&&viewCache.get(viewKey());
+ if(cached){Object.assign(state,{chat:cached.chat,proposal:cached.proposal,dashboard:cached.dashboard,chatThreads:cached.chatThreads,canNegotiate:cached.canNegotiate});render(cached.html);if(/^#(?:conversation|negotiation)\//.test(location.hash))$('#content').classList?.add('chat-layout-v3');backgroundEpoch=epoch;}else if(!preserveScroll)loading();
+ try{if(!state.session)await initialize();else await route();if(position&&epoch===state.epoch)window.scrollTo(position);}catch(e){if(!e.stale)await error(e);}finally{if(backgroundEpoch===epoch)backgroundEpoch=null;}
+}
+async function refreshVisible(){
+ if(composing||refreshPending||activeOperations||state.busy||state.loading||document.visibilityState==='hidden'||(!state.session?.authenticated&&!state.pairingId)||state.session?.user?.onboardingCompleted===false)return;
+ const view=location.hash.slice(1).split('/')[0];if(!['','home','children','child-home','chores','requests','conversations','conversation','negotiation','proposal','settings','pairing','invitation'].includes(view))return;
+ refreshPending=true;const epoch=state.epoch;backgroundEpoch=epoch;
+ try{if(view==='invitation'&&parent()&&state.invitation){const d=await api('/children');if(d.children?.find(c=>c.childId===state.invitation.childId)?.hasLinkedDevice){state.invitation.connected=true;invitation(state.invitation.childId);}}else if(view==='pairing'&&state.pairingId){pairView(await api('/pairing/requests/'+path(state.pairingId)));}else if(view==='conversations'&&!parent()&&state.chat?.conversationId){renderChat(await api('/conversations/'+encodeURIComponent(state.chat.conversationId)));}else if(view==='conversation'){renderChat(await api('/conversations/'+encodeURIComponent(location.hash.slice(1).split('/')[1])));}else await route();}
+ catch(e){if(!e.stale&&e.status===401)await error(e);}
+ finally{if(state.epoch===epoch){backgroundEpoch=null;}refreshPending=false;}
+}
+
 
 async function error(e){if(e.stale){if(e.completed)notice('前の画面の操作が完了しました。最新の状態に更新して確認してください。');return;}notice(e.message||'処理に失敗しました。',true);if(state.loading)render('<h1>画面を読み込めませんでした</h1><p>少し待ってから、もう一度お試しください。</p>'+btn('もう一度読み込む','reload'));if(e.code==='PAIRING_EXPIRED'){state.pairingId=null;sessionStorage.removeItem('pairingRequestId');welcome();}else if(e.status===401){state.session={authenticated:false,demo:state.session?.demo};API.clear();welcome();}if(e.code==='CSRF_INVALID')await api('/auth/session');if(['VERSION_CONFLICT','INVALID_STATE','CONFLICT'].includes(e.code))$('#notice').insertAdjacentHTML('beforeend',btn('最新の状態を確認','reload'));}
 async function run(task,source){
  if(state.busy){notice('前の操作を処理中です。完了後にもう一度操作してください。');return;}
- state.busy=true;activity(1);
+ if(backgroundEpoch===state.epoch){state.epoch++;backgroundEpoch=null;}state.busy=true;activity(1);
  const controls=source?[...(source.matches('form')?source.querySelectorAll('button,input,textarea,select'):[source])]:[];
  const disabled=controls.map(c=>c.disabled);controls.forEach(c=>c.disabled=true);
  notice();
@@ -293,7 +321,7 @@ async function action(a,id){
  if(a==='proposal')return go('#proposal/'+id);
  if(a==='consult-proposal'){const d=await api('/proposals/'+path(id));if(!d.canConsult)throw new Error('共有交渉は開始前、回答待ち、または終了しています。');return go('#negotiation/'+d.negotiationId);}
  if(a==='search-product-now'){
-  notice('これまでの会話から商品を探しています…');
+  notice(kid('商品を探しています…','さがしているよ…'));
   const detail=await api(chatPath()+'/search','POST',{
     fromConversation:true
   });
@@ -301,15 +329,16 @@ async function action(a,id){
   return renderChat(detail);
 }
  if(a==='select-product')return renderChat(await api(chatPath()+'/selected-product','PATCH',{selectedProductId:id}));
+ if(a==='confirm-reason'){const d=await api(chatPath()+'/confirm-reason','POST',{reasonSummary:state.chat.reasonSummary});renderChat(d);return go('#proposal/'+d.currentProposal.id);}
  if(a==='generate-proposal'){
   const shared=state.chat.mode==='negotiation', before=shared?state.chat.draftProposal:state.chat.currentProposal;
   const d=await api(chatPath()+'/proposal-drafts','POST',{}), draft=shared?d.draftProposal:d.currentProposal;
   renderChat(d);
   const updated=draft&&(!before||draft.id!==before.id||draft.version!==before.version);
-  if(!updated)return notice(d.latestAIOutput?.reply||'下書きを作成できませんでした。必要な条件を確認してください。',true);
+  if(!updated)return;
   return go('#proposal/'+draft.id);
  }
- if(a==='send-proposal'){if(state.dirty)throw new Error('編集内容が未保存です。保存してから送ってください。');if(!confirm(kid('この商品と条件を相手に送りますか？','この おねがいを おうちのひとに おくる？')))return;await api('/proposals/'+path(id)+'/send','POST',{version:state.proposal.proposal.version});await proposal(id);return notice(kid('相手に送りました。返事をお待ちください。','おうちのひとに おくったよ。おへんじを まってね。'));}
+ if(a==='send-proposal'){if(state.dirty)throw new Error('編集内容が未保存です。保存してから送ってください。');if(!confirm(kid('この商品と理由を送りますか？','この おねがいを おうちのひとに おくる？')))return;await api('/proposals/'+path(id)+'/send','POST',{version:state.proposal.proposal.version});await proposal(id);return notice(kid('相手に送りました。返事をお待ちください。','おうちのひとに おくったよ。おへんじを まってね。'));}
  if(a==='revoke-device'){if(!confirm('選択した端末の接続を解除しますか？ その端末では再接続が必要になります。'))return;const d=await api('/devices/'+path(id),'DELETE');if(d.currentDeviceRevoked){state.session={authenticated:false,demo:state.session?.demo};API.clear();return welcome();}await settings();return notice('選択した端末の接続を解除しました。');}
  if(a==='pairing-check'){history.replaceState(null,'','#pairing');await api('/pairing/session','POST',{});return pairView(await api('/pairing/requests/'+path(state.pairingId)));}
  if(a==='pairing-complete'){state.session=await api('/pairing/requests/'+path(state.pairingId)+'/complete','POST',{});sessionStorage.removeItem('pairingRequestId');state.pairingId=null;return go('#home');}
@@ -317,13 +346,13 @@ async function action(a,id){
 async function submit(name,id,f){
  if(name==='pair-respond-modal'){const code=f.confirmationCode.normalize('NFKC').trim();if(!/^[0-9]{6}$/.test(code))throw new Error('6桁の確認番号を入力してください。');return respondPairingDialog(id,'approved',code);}
  if(name==='pair-code'){await pair(f.invitationToken.trim().toUpperCase());history.replaceState(null,'','#pairing');return;}
- if(name==='child-profile'){await api('/profile','PATCH',{profile:{preferences:{interests:lines(f.interests),wishes:lines(f.wishes)}}});return notice('好きなことを保存しました。');}
+ if(name==='child-profile'){await api('/profile','PATCH',{profile:{preferences:{interests:lines(f.interests)}}});return notice('好きなことを保存しました。');}
  if(name==='search-products')return renderChat(await api(chatPath()+'/search','POST',{query:f.query.trim()}));
- if(name==='onboarding'){const payload=parent()?{displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null,chorePreferences:lines(f.chorePreferences),onboardingCompleted:true}:{profile:{preferences:{interests:lines(f.interests),wishes:lines(f.wishes),expectations:[]}},onboardingCompleted:true};await api('/profile','PATCH',payload);state.session=await api('/auth/session');return go(parent()?'#children':'#home');}
- if(name==='create-child'){const c=await api('/children','POST',{...identity(f),chorePreferences:lines(f.chorePreferences)});state.childId=c.childId;if(c.settingsSaved===false){await go('#child-settings/'+c.childId);return notice('子どもは登録済みですが、目標の設定を保存できませんでした。この画面で設定を保存してください。再登録は不要です。',true);}await children();return notice('子どもを登録しました。続いて「端末をつなぐ招待を作る」から接続できます。');}
+ if(name==='onboarding'){const payload=parent()?{displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null,onboardingCompleted:true}:{profile:{preferences:{interests:lines(f.interests),expectations:[]}},onboardingCompleted:true};await api('/profile','PATCH',payload);state.session=await api('/auth/session');return go(parent()?'#children':'#home');}
+ if(name==='create-child'){const c=await api('/children','POST',{...identity(f)});state.childId=c.childId;if(c.settingsSaved===false){await go('#child-settings/'+c.childId);return notice('子どもは登録済みですが、目標の設定を保存できませんでした。この画面で設定を保存してください。再登録は不要です。',true);}try{return await action('invite',c.childId);}catch(e){await children();return notice('子どもは登録しました。端末の接続準備に失敗しました。「端末をつなぐ」から再開できます。',true);}}
  if(name==='child-info'){await api('/children/'+path(id),'PATCH',identity(f));await childSettings(id);return notice('子どもの情報を保存しました。');}
- if(name==='child-settings'){await api('/children/'+path(id)+'/settings','PATCH',{constraints:{mustHave:lines(f.mustHave),mustAvoid:lines(f.mustAvoid)},chorePreferences:lines(f.chorePreferences)});return notice('条件を保存しました。');}
- if(name==='profile'){await api('/profile','PATCH',{displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null,chorePreferences:lines(f.chorePreferences)});state.session=await api('/auth/session');return notice('プロフィールを保存しました。');}
+ if(name==='child-settings'){await api('/children/'+path(id)+'/settings','PATCH',{constraints:{mustHave:lines(f.mustHave),mustAvoid:lines(f.mustAvoid)}});return notice('条件を保存しました。');}
+ if(name==='profile'){await api('/profile','PATCH',{displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null});state.session=await api('/auth/session');return notice('プロフィールを保存しました。');}
  if(name==='pair-respond'){await api('/pairing/requests/'+path(id)+'/responses','POST',{decision:f.decision,...(f.decision==='approved'?{confirmationCode:f.confirmationCode.trim()}:{})});await settings();return notice('接続申請に返事しました。子どもの端末で接続を完了してください。');}
  if(name==='create-chore'){await api('/chores','POST',{childId:state.childId,title:f.title.trim(),description:f.description.trim(),rewardAmountYen:amount(f.rewardAmountYen),dueAt:due(f.dueAt)});await chores();return notice('お手伝いを依頼しました。');}
  if(name==='create-request'){await api('/chore-requests','POST',{title:f.title.trim(),note:f.note.trim()});await chores();return notice('おうちのひとに つたえたよ。');}
@@ -331,7 +360,8 @@ async function submit(name,id,f){
  if(name==='submit-chore'){await api('/chores/'+path(id)+'/submit','POST',{note:f.note.trim()});await chores();return notice('できた！を しらせたよ。');}
  if(name==='review-chore'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('やり直してほしいことを書いてください。');await api('/chores/'+path(id)+'/review','POST',{decision:f.decision,reason:f.reason.trim()});await chores();return notice(f.decision==='approved'?'ありがとうポイントを反映しました。':'やり直しをお願いしました。');}
  if(name==='message')return renderChat(await api(chatPath()+'/messages','POST',{message:f.message.trim()}));
- if(name==='edit-proposal'){if(!lines(f.purchaseConditions).length)throw new Error('やくそくを1つ以上入力してください。');const saved=await api('/proposals/'+path(id),'PATCH',{version:state.proposal.proposal.version,persuasionText:f.persuasionText.trim(),purchaseConditions:lines(f.purchaseConditions)});state.proposal=saved;state.dirty=false;return action('send-proposal',id);}
+ if(name==='edit-proposal'){const saved=await api('/proposals/'+path(id),'PATCH',{version:state.proposal.proposal.version,persuasionText:f.persuasionText.trim(),purchaseConditions:[]});state.proposal=saved;state.dirty=false;return action('send-proposal',id);}
+ if(name==='decide-negotiation'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('見送る理由を書いてください。');await api('/negotiations/'+path(id)+'/decision','POST',{version:state.chat.currentProposal.version,decision:f.decision,reason:f.reason.trim()||null});return negotiation(id);}
  if(name==='respond-proposal'){if(f.decision!=='approved'&&!f.reason.trim())throw new Error('理由を書いてください。');const d=await api('/proposals/'+path(id)+'/responses','POST',{version:state.proposal.proposal.version,decision:f.decision,reason:f.reason.trim()||null});if(d.canConsult)return go('#negotiation/'+d.negotiationId);await proposal(id);return notice(f.decision==='approved'?'合意して、目標に登録しました。':'理由を伝えて、今回は見送りにしました。');}
 }
 document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b){e.preventDefault();if(['child-home','child-settings','open-chat','open-negotiation','proposal','reload'].includes(b.dataset.action)){Promise.resolve(action(b.dataset.action,b.dataset.id)).catch(error);}else run(()=>action(b.dataset.action,b.dataset.id),b);return;}const a=e.target.closest('a[href^="#"]');if(a){e.preventDefault();void go(a.getAttribute('href'));}});
@@ -343,6 +373,9 @@ document.addEventListener('error',e=>{if(e.target.matches?.('.product-image')){e
 window.addEventListener('hashchange',()=>{if(!canLeave()){history.replaceState(null,'',state.routeHash||'#home');return;}void navigate();});
 async function initialize(){loading();state.session=await api('/auth/session');const token=new URLSearchParams(location.hash.slice(1)).get('invitationToken');if(token){if(state.session.authenticated){history.replaceState(null,'','#home');await route();notice('ログイン中です。子どもの別端末または別ブラウザーで招待を開いてください。',true);return;}history.replaceState(null,'','/pairing');await pair(token);history.replaceState(null,'','#pairing');return;}if(new URLSearchParams(location.search).has('authError')){history.replaceState(null,'',location.pathname+location.hash);await route();notice('ログインできませんでした。もう一度お試しください。',true);return;}await route();}
 $('#pairing-dialog')?.addEventListener('cancel',e=>{e.preventDefault();if(!state.busy){if(pairingMonitor.request)pairingMonitor.dismissed.add(pairingMonitor.request.pairingRequestId);closePairingDialog();}});
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden')void checkPairingRequests();});
-run(initialize).then(()=>{void checkPairingRequests();window.setInterval?.(()=>void checkPairingRequests(),5000);});
+document.addEventListener('compositionstart',()=>{composing=true;});
+document.addEventListener('compositionend',()=>{composing=false;});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden'){void refreshVisible();void checkPairingRequests();}});
+window.addEventListener('focus',()=>void refreshVisible());
+run(initialize).then(()=>{void checkPairingRequests();window.setInterval?.(()=>void checkPairingRequests(),5000);window.setInterval?.(()=>void refreshVisible(),2000);});
 })();

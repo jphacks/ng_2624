@@ -18,6 +18,11 @@ test('database migrations, private proposals, chores, purchases and pairing', as
   try {await db.exec(sql);} catch(error) {throw new Error(`Migration ${file}: ${error}`,{cause:error});}
  }
  const rpc=async(name:string,args:unknown[])=> (await db.query(`select public.${name}(${args.map((_,i)=>'$'+(i+1)).join(',')}) as result`,args)).rows[0].result;
+ const confirmed=async(actor:string,conversation:string,productId:string,reason:string)=>{
+  await db.query(`update conversations set products=jsonb_build_array(jsonb_build_object('id',$1::text,'size','small')),reason_draft=jsonb_build_object('productId',$1::text,'persuasionText',$2::text) where id=$3`,[productId,reason,conversation]);
+  await rpc('wb_confirm_reason',[actor,conversation,reason]);
+  return (await db.query('select * from proposals where conversation_id=$1 order by created_at desc limit 1',[conversation])).rows[0];
+ };
  const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
  const parent=id(1),child=id(2),stranger=id(3),family=id(10),otherFamily=id(11),conv=id(20),product=id(30);
  await db.exec(`insert into auth.users(id) values('${parent}'),('${child}'),('${stranger}');
@@ -53,6 +58,8 @@ test('database migrations, private proposals, chores, purchases and pairing', as
  let proposal:any;
  await t.test('private draft then explicit send, stale version and both-role same-version agreement',async()=>{
   proposal=await rpc('wb_save_proposal',[child,conv,product,'本がほしい',[], 'small']);
+  await assert.rejects(rpc('wb_send_proposal',[child,proposal.id,proposal.version,parent]),/confirm the reason/);
+  proposal=await confirmed(child,conv,product,'本がほしい');
   assert.equal(proposal.negotiation_id,null);
   await assert.rejects(rpc('wb_send_proposal',[child,proposal.id,99,parent]),/Stale/);
   await rpc('wb_send_proposal',[child,proposal.id,proposal.version,parent]);
@@ -72,7 +79,7 @@ test('database migrations, private proposals, chores, purchases and pairing', as
  await t.test('child proposal and parent revision keep source conversations private; price snapshot, slot and balance checks',async()=>{
   const parentConv=id(21),revisionConv=id(24);
   await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id,started_at) values('${parentConv}','${child}','${child}','${product}',now());`);
-  const parentDraft=await rpc('wb_save_proposal',[child,parentConv,product,'子から提案',[], 'small']);
+  const parentDraft=await confirmed(child,parentConv,product,'子から提案');
   await rpc('wb_send_proposal',[child,parentDraft.id,parentDraft.version,parent]);
   await rpc('wb_review_proposal',[parent,parentDraft.id,parentDraft.version,'revision_requested','条件を変えたい']);
   await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id,context_proposal_id) values('${revisionConv}','${parent}','${child}','${product}','${parentDraft.id}')`);
@@ -86,7 +93,7 @@ test('database migrations, private proposals, chores, purchases and pairing', as
   assert.equal(goal.target_amount_yen,95);
   await assert.rejects(rpc('wb_purchase_goal',[parent,goal.id]),/Insufficient balance/);
   const otherConv=id(23);await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id,started_at) values('${otherConv}','${child}','${child}','${product}',now())`);
-  const other=await rpc('wb_save_proposal',[child,otherConv,product,'もう一つ',[], 'small']);
+  const other=await confirmed(child,otherConv,product,'もう一つ');
   await rpc('wb_send_proposal',[child,other.id,other.version,parent]);
   await assert.rejects(rpc('wb_review_proposal',[parent,other.id,other.version,'approved',null]),/active goal/);
   assert.equal((await db.query('select count(*)::integer as count from proposal_approvals where proposal_id=$1',[other.id])).rows[0].count,1);
@@ -111,10 +118,15 @@ test('database migrations, private proposals, chores, purchases and pairing', as
   assert.equal((await db.query('select count(*)::integer as count from messages where conversation_id=$1',[aiConv])).rows[0].count,3);
   const valid={action:'PROPOSAL',reply:'提案です',proposalDraft:{productId:candidate,persuasionText:'欲しい',purchaseConditions:['お手伝い'],basedOn:null}};
   await rpc('wb_finish_ai',[child,aiConv,wrong,'提案して',valid]);
+  assert.equal((await db.query('select * from proposals where conversation_id=$1',[aiConv])).rows.length,0);
+  await rpc('wb_confirm_reason',[child,aiConv,'欲しい']);
   const draft=(await db.query('select * from proposals where conversation_id=$1',[aiConv])).rows[0];
+  assert.deepEqual(draft.purchase_conditions,[]);
   await rpc('wb_begin_ai',[child,aiConv,lock]);
   await assert.rejects(rpc('wb_save_proposal',[child,aiConv,candidate,'変更',[],'medium',draft.id,draft.version,null]),/busy/);
   await rpc('wb_finish_ai',[child,aiConv,lock,'直して',{...valid,action:'NEGOTIATION',proposalDraft:{...valid.proposalDraft,basedOn:{proposalId:draft.id,version:draft.version}}}]);
+  assert.equal((await db.query('select reason_confirmed from conversations where id=$1',[aiConv])).rows[0].reason_confirmed,false);
+  await rpc('wb_confirm_reason',[child,aiConv,'欲しい']);
   assert.equal((await db.query('select version from proposals where id=$1',[draft.id])).rows[0].version,draft.version+1);
  });
  await t.test('pairing requires parent code verification and single completion',async()=>{
