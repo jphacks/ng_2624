@@ -1,10 +1,20 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import { ConversationError } from '../ai/errors.ts';
 import { AppError, assert, text, uuid, integer, strings, date, randomToken, hash, equal, seal, unseal, cookie, cookieName, cookies, protectMutation, configured } from './core.ts';
 import type { Config, DB, Row } from './core.ts';
 import type { AIInput, AIOutput, ProductCandidate } from '../../Sample_db/types.ts';
 
 interface Dependencies { db: DB; ai: (input: AIInput) => Promise<AIOutput>; enrich: (product: ProductCandidate) => Promise<ProductCandidate | null>; image: (url: string) => Promise<{ body: Buffer; contentType: string } | null>; qr: (url: string) => Promise<string>; }
 const DAY = 86400000;
+function aiFailure(error: unknown, fallback: string): AppError {
+  if (error instanceof AppError) return error;
+  const code = error instanceof ConversationError ? error.code : 'UNKNOWN';
+  console.error('AI request failed', { name: error instanceof Error ? error.name : 'unknown', code });
+  if (code === 'RATE_LIMIT') return new AppError(429, 'RATE_LIMITED', 'AIの利用上限に達したため、商品検索・応答を実行できません。時間を置いて再度お試しください。');
+  if (code === 'TIMEOUT') return new AppError(502, 'AI_UNAVAILABLE', 'AIの応答が時間内に届きませんでした。保存済みの会話を確認してから再操作してください。');
+  return new AppError(502, 'AI_UNAVAILABLE', fallback);
+}
+
 const emptySettings = () => ({ rewardGuidelines: { smallJpy: null, mediumJpy: null, largeJpy: null }, constraints: { mustHave: [], mustAvoid: [] }, chorePreferences: [] });
 const eq = (v: string) => `eq.${v}`;
 const listOf = (v: string[]) => `in.(${v.join(',')})`;
@@ -130,9 +140,7 @@ export function createApp(config: Config, dep: Dependencies) {
       return negotiationView(user,await accessibleNegotiation(user,n.id));
     } catch(e) {
       await db.rpc('wb_cancel_negotiation_ai',{p_actor_id:user.id,p_negotiation_id:n.id,p_lock_id:lockId}).catch(()=>{});
-      if(e instanceof AppError)throw e;
-      console.error('Negotiation AI failed',{name:e instanceof Error?e.name:'unknown'});
-      throw new AppError(502,'AI_UNAVAILABLE','AIの返答を取得できませんでした。保存済みの交渉を確認してから再操作してください。');
+      throw aiFailure(e, 'AIの返答を取得できませんでした。保存済みの交渉を確認してから再操作してください。');
     }
   }
   async function runAI(user: Row, conversationId: string, message: string | null, searchQuery?: string) {
@@ -154,9 +162,7 @@ export function createApp(config: Config, dep: Dependencies) {
       return chatView(user, updated);
     } catch (e) {
       await db.rpc('wb_cancel_ai', { p_actor_id: user.id, p_conversation_id: c.id, p_lock_id: lockId }).catch(() => {});
-      if (e instanceof AppError) throw e;
-      console.error('AI request failed', { name: e instanceof Error ? e.name : 'unknown' });
-      throw new AppError(502, 'AI_UNAVAILABLE', 'AIの返答を取得できませんでした。少し待ってからお試しください。');
+      throw aiFailure(e, 'AIの返答を取得できませんでした。少し待ってからお試しください。');
     }
   }
   return async function app(request: Request, remoteAddress = 'local'): Promise<Response> {
@@ -304,7 +310,7 @@ export function createApp(config: Config, dep: Dependencies) {
         return result({ devices: devices.map(d => ({ deviceSessionId: d.token_hash, role: d.user_id === user.id ? 'parent' : 'child', childId: d.user_id === user.id ? null : d.user_id, childDisplayName: cs.find(c => c.childId === d.user_id)?.displayName || null, deviceLabel: d.device_label || '端末', createdAt: d.created_at, lastActiveAt: d.last_active_at, isCurrent: d.token_hash === session.row.token_hash })) });
       }
       const device = /^\/api\/devices\/([a-f0-9]{64})$/.exec(path);
-      if (device && method === 'DELETE') { reauth(); const d = await one('app_sessions', { token_hash: eq(device[1]) }); if (d.user_id !== user.id) await family(user, d.user_id); await db.update('app_sessions', { token_hash: eq(device[1]) }, { revoked_at: new Date().toISOString() }); if (device[1] === session.row.token_hash) setCookie('session', '', 0); return result({ deviceSessionId: device[1], revoked: true, currentDeviceRevoked: device[1] === session.row.token_hash }); }
+      if (device && method === 'DELETE') { requireParent(); const d = await one('app_sessions', { token_hash: eq(device[1]) }); if (d.user_id !== user.id) await family(user, d.user_id); await db.update('app_sessions', { token_hash: eq(device[1]) }, { revoked_at: new Date().toISOString() }); if (device[1] === session.row.token_hash) setCookie('session', '', 0); return result({ deviceSessionId: device[1], revoked: true, currentDeviceRevoked: device[1] === session.row.token_hash }); }
       if (path === '/api/dashboard' && method === 'GET') {
         const cs = await children(user); const id = user.role === 'child' ? user.id : url.searchParams.get('childId') || cs[0]?.childId;
         if (!id) return result({ children: cs, childId: null, balanceYen: 0, lifetimeEarnedYen: 0, weeklyPaceYen: 0, goals: [], chores: [], choreRequests: [], proposals: [] });
