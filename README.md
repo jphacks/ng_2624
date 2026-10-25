@@ -2,7 +2,7 @@
 
 **がんばりと「ほしい」を、親子でつなぐ。**
 
-[![IMAGE ALT TEXT HERE](https://jphacks.com/wp-content/uploads/2026/07/IMG_5316.png)](https://www.youtube.com/watch?v=piaNsc6ilBI)
+![ふぁみぽぽ](/top.png)
 
 ## 製品概要
 
@@ -54,20 +54,14 @@
 
 ### 注力したこと（こだわり等）
 
+
 * 個別相談と共有交渉を分け、誰に何が見えるかを画面・サーバー・DB・AIのすべてで守ったこと
 * ポイントの加算・購入時の引き落とし・提案の版の管理を、DBのトランザクションで二重に起きないようにしたこと
 * 子どもに外部の販売サイトのリンクを見せず、商品の確認は親が販売元で行う作りにしたこと
 
 ## 全体の構成
 
-```mermaid
-flowchart LR
-  B["ブラウザー<br>frontend/"] -- "/api（同じURL）" --> S["Node.js サーバー<br>src/server/"]
-  S --> AI["会話AI<br>src/ai/"]
-  AI --> G["Gemini API<br>Google Search"]
-  S --> DB["Supabase<br>PostgreSQL・Auth"]
-  S --> P["商品ページ<br>（画像の取得）"]
-```
+![ふぁみぽぽのしくみ](/mechanism.png)
 
 - ブラウザーが話す相手は、同じURLの Node.js サーバーだけです。Gemini や Supabase のキーはサーバーだけが持ち、画面には渡しません。
 - サーバーがログイン・権限・保存を受け持ち、AIへの入力を作って `src/ai` を呼びます。

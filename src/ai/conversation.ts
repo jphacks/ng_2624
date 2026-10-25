@@ -2,7 +2,7 @@ import type { AIInput, AIOutput, ProposalDraft } from '../../Sample_db/types.ts'
 import { ConversationError, toConversationError } from './errors.ts';
 import { generateGeminiReply } from './gemini.ts';
 import type { ReplyGenerator } from './gemini.ts';
-import { buildConversationRequest } from './prompt.ts';
+import { buildConversationRequest, CONVERSATION_SEARCH_MESSAGE } from './prompt.ts';
 import { parseDecision } from './protocol.ts';
 import { searchProducts } from './search.ts';
 import { searchAmazon } from './amazon.ts';
@@ -40,11 +40,19 @@ export async function createReply(
                 reply: 'この提案への承認が記録されています。提案の状態を確認してください。' };
         }
         const generate = dependencies.generate ?? generateGeminiReply;
-        const generated = input.searchQuery ? { text: JSON.stringify({ action: 'SEARCH', reply: '指定された条件で商品を探します。', searchQuery: input.searchQuery, persuasionText: null, purchaseConditions: [], constraintsSatisfied: false }) } : await generate(buildConversationRequest(input));
+        const searchRequested = input.mode === 'consultation' && input.message === CONVERSATION_SEARCH_MESSAGE;
+        const request = buildConversationRequest(input);
+        if (searchRequested) request.systemInstruction += '\n今回は検索ボタンによる操作です。必ずSEARCHを選び、会話から商品カテゴリ・用途だけの短いsearchQueryを作ってください。条件が不明でも質問せず、近いカテゴリへ広げて検索します。';
+        const generated = input.searchQuery ? { text: JSON.stringify({ action: 'SEARCH', reply: '指定された条件で商品を探します。', searchQuery: input.searchQuery, persuasionText: null, purchaseConditions: [], constraintsSatisfied: false }) } : await generate(request);
         if (typeof generated.text !== 'string' || !generated.text.trim()) {
             throw new ConversationError('EMPTY_RESPONSE', 'Geminiから返答がありませんでした。');
         }
         const decision = parseDecision(generated.text);
+        // 検索ボタンの操作は、モデルが聞き取りを選んでも実際の検索まで進める。
+        if (searchRequested) {
+            decision.action = 'SEARCH';
+            decision.searchQuery ||= 'おもちゃ';
+        }
         const base = { requestId: input.requestId, reply: decision.reply, search: null };
         // 個別相談で検索・初回提案まで行うが、モデルの判断で共有交渉へ移行しない。
         if (input.mode === 'consultation' && decision.action === 'NEGOTIATION') {
@@ -61,7 +69,7 @@ export async function createReply(
             const labels = { small: '小', medium: '中', large: '大' };
             const missing = GOAL_SIZES.filter(size => !found.products.some(product => product.size === size));
             const consultation = missing.length
-                ? `${missing.map(size => labels[size]).join('・')}の目安±20％で希望に合う商品を確認できませんでした。この区分の希望条件や目安金額を見直しますか？`
+                ? `${missing.map(size => labels[size]).join('・')}の商品を確認できませんでした。希望条件や目安金額を見直して再検索できます。`
                 : '大中小それぞれ1件の候補が見つかりました。気になるものを1つ選んでください。';
             if (!found.products.length) return { ...base, action: 'HEARING', search: found.search, reply: consultation };
             return { ...base, action: 'PRODUCT', ...found, reply: `${consultation} 表示価格は検索時の参考価格です。` };

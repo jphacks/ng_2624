@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import type { Interactions } from '@google/genai';
-import type { SearchMetadata } from '../../Sample_db/types.ts';
+import type { ProductCandidate, SearchMetadata } from '../../Sample_db/types.ts';
 import { ConversationError } from './errors.ts';
 import type { ConversationRequest } from './prompt.ts';
 import { publicUrl } from './validation.ts';
@@ -13,6 +13,8 @@ export interface GenerationResult {
     search: SearchMetadata | null;
     /** 出典ごとの引用対象テキスト。内部の価格検証にだけ使う。 */
     evidence: Record<string, string[]>;
+    /** Amazonの検索カードから直接取得した実商品。モデルの推測は入れない。 */
+    candidates?: Omit<ProductCandidate, 'id' | 'size' | 'priceCheckedAt'>[];
 }
 export type ReplyGenerator = (request: ConversationRequest) => Promise<GenerationResult>;
 export interface GeminiOptions {

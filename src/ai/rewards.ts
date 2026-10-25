@@ -10,7 +10,7 @@ export function withinGuideline(price: number, amount: number | null): boolean {
 
 /** 最大3区分を埋め、その中で目安からの相対的な価格差の合計を最小にする。 */
 export function selectRewards(
-    candidates: Omit<ProductCandidate, 'size'>[], guidelines: RewardGuidelines,
+    candidates: Omit<ProductCandidate, 'size'>[], guidelines: RewardGuidelines, relaxPrice = false,
 ): ProductCandidate[] {
     let best: ProductCandidate[] = [];
     let bestDistance = Infinity;
@@ -24,7 +24,7 @@ export function selectRewards(
         const size = GOAL_SIZES[index];
         const amount = guidelines[`${size}Jpy`];
         for (const candidate of candidates) {
-            if (candidate.priceJpy === null || !withinGuideline(candidate.priceJpy, amount)
+            if (candidate.priceJpy === null || amount === null || (!relaxPrice && !withinGuideline(candidate.priceJpy, amount))
                 || chosen.some(item => item.id === candidate.id || item.productUrl === candidate.productUrl
                     || item.name.trim().toLowerCase() === candidate.name.trim().toLowerCase())) continue;
             chosen.push({ ...candidate, size });
