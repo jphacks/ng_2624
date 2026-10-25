@@ -5,7 +5,7 @@ import type { ReplyGenerator } from './gemini.ts';
 import { buildConversationRequest, CONVERSATION_SEARCH_MESSAGE } from './prompt.ts';
 import { parseDecision } from './protocol.ts';
 import { searchProducts } from './search.ts';
-import { searchAmazon } from './amazon.ts';
+import { searchRetail } from './retail.ts';
 import { parseAIInput } from './validation.ts';
 
 /** 価格の再確認間隔。購入価格の保証ではなく、古い候補を提案へ進めないための初期値。 */
@@ -61,7 +61,7 @@ export async function createReply(
         if (decision.action === 'SEARCH') {
             const found = await searchProducts(decision.searchQuery!, {
                 now: input.now, constraints: input.constraints,
-            }, generate, dependencies.createId ?? (() => crypto.randomUUID()), dependencies.search ?? (dependencies.generate ? generate : searchAmazon));
+            }, generate, dependencies.createId ?? (() => crypto.randomUUID()), dependencies.search ?? (dependencies.generate ? generate : searchRetail));
             const consultation = found.products.length === 3
                 ? '3件の候補が見つかりました。気になるものを1つ選んでください。'
                 : found.products.length ? `${found.products.length}件の候補が見つかりました。気になるものを選ぶか、再検索できます。`

@@ -124,16 +124,11 @@ test('ゲーム3件は画像取得が拒否されても全件表示用に残る'
   const result=await Promise.all(candidates.map(p=>preview.prepareProduct(p)));
   assert.equal(result.filter(Boolean).length,3);assert.ok(result.every(p=>p?.imageUrl===null));
 });
-test('検索の引用リンクの解決失敗でゲーム候補を削除せず、未確認と明示する',async()=>{
-  const preview=createProductPreview({resolve:async()=>[publicAddress],read:async()=>{throw new Error('upstream unavailable');}});
-  const source='https://vertexaisearch.cloud.google.com/grounding-api-redirect/source-1';
-  const candidate={...product,name:'ゲーム',productUrl:source,sourceUrls:[source]};
-  const result=await preview.prepareProduct(candidate);
-  assert.equal(result?.name,'ゲーム');assert.equal(result?.productUrl,source);assert.equal(result?.imageUrl,null);
-  assert.match(result!.recommendationReason,/未確認/);
-  assert.equal(await preview.prepareProduct({...candidate,sourceUrls:[]}),null);
-  for(const value of ['https://evil.test/product','https://vertexaisearch.cloud.google.com.evil.test/grounding-api-redirect/id','http://vertexaisearch.cloud.google.com/grounding-api-redirect/id','https://vertexaisearch.cloud.google.com/other']){
-    assert.equal(await preview.prepareProduct({...candidate,productUrl:value,sourceUrls:[value]}),null);
+test('記事やQ&Aを商品の出典として残さない',async()=>{
+  for(const destination of ['https://detail.chiebukuro.yahoo.co.jp/qa/question_detail/q13238828848','https://www.inside-games.jp/article/2021/04/29/132124.html']){
+    const preview=createProductPreview({resolve:async()=>[publicAddress],read:async()=>({status:302,headers:{location:destination},body:Buffer.alloc(0)})});
+    const source='https://vertexaisearch.cloud.google.com/grounding-api-redirect/source-1';
+    assert.equal(await preview.prepareProduct({...product,productUrl:source,sourceUrls:[source]}),null);
   }
 });
 
@@ -196,4 +191,17 @@ test('JSON-LD Product image objects support link previews without OG tags', asyn
   const result = await preview.enrichProduct({ ...product, priceJpy: null, imageUrl: null, productUrl: 'https://www.amazon.co.jp/dp/B000000001' });
   assert.equal(result.imageUrl, '/api/products/product-1/image');
   assert.equal(result.priceJpy, 7980);
+});
+
+test('販売店の検索カードから得た実画像を、商品HTMLの取得失敗でも配信する',async()=>{
+ const imageUrl='https://image.yodobashi.com/product/100/000/001/009/063/421/100000001009063421_10205.jpg';
+ let pages=0;
+ const preview=createProductPreview({resolve:async()=>[publicAddress],read:async url=>{
+  if(url.hostname==='image.yodobashi.com')return pngResponse();
+  pages++;throw Error('product HTML unavailable');
+ }});
+ const candidate={...product,priceJpy:59980,productUrl:'https://www.yodobashi.com/product/100000001009063421/',imageUrl};
+ const enriched=await preview.prepareProduct(candidate);
+ assert.equal(enriched?.imageUrl,'/api/products/product-1/image');assert.equal(enriched?.priceJpy,59980);assert.equal(pages,0);
+ assert.deepEqual(await preview.fetchResolvedProductImage(candidate.productUrl),{body:png,contentType:'image/png'});
 });

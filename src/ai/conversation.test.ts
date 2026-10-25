@@ -15,7 +15,7 @@ import { parseAmazonResults, searchAmazon } from './amazon.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const NOW = '2026-10-23T20:00:00+09:00';
-const PRODUCT_URL = 'https://www.tamiya.com/japan/products/70216/index.html';
+const PRODUCT_URL = 'https://www.amazon.co.jp/dp/B000000001';
 const QUOTE = 'ロボット工作セットの価格は2,980円です。';
 const product: ProductCandidate = {
     size: 'medium', id: 'product-1', name: 'ロボット工作セット', priceJpy: 2980, productUrl: PRODUCT_URL,
@@ -558,7 +558,7 @@ test('価格制限なしで異なる商品を3件選び、価格順の区分を�
 test('検索で大中小各1件を返し、そのまま提案へ進める', async () => {
     const source = grounded();
     const raw = JSON.parse(extraction().text);
-    source.search!.sources = [800, 3000, 12000].map((price, index) => ({ id: `s${index}`, title: '販売元', url: `https://www.tamiya.com/product-${index}` }));
+    source.search!.sources = [800, 3000, 12000].map((price, index) => ({ id: `s${index}`, title: '販売元', url: `https://www.amazon.co.jp/dp/B00000000${index}` }));
     source.evidence = Object.fromEntries([800, 3000, 12000].map((price, index) => [`s${index}`, [`価格は${price}円です。`]]));
     raw.products = [800, 3000, 12000].map((price, index) => ({ ...raw.products[0], name: `商品${index}`, priceJpy: price,
         priceEvidence: `価格は${price}円です。`, productSourceId: `source-${index + 1}`, sourceIds: [`source-${index + 1}`] }));

@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { request } from 'node:https';
 import type { ProductCandidate } from '../shared/types.ts';
+import { isRetailProductUrl } from '../shared/product-source.ts';
 
 export type PreviewImage = { body: Buffer; contentType: string };
 type Address = { address: string; family: number };
@@ -19,6 +20,18 @@ function amazonImage(value: string | null | undefined): URL | null {
     const url = httpsUrl(value);
     return ['m.media-amazon.com', 'images-na.ssl-images-amazon.com', 'images-fe.ssl-images-amazon.com'].includes(url.hostname) && url.pathname.startsWith('/images/I/') ? url : null;
   } catch { return null; }
+}
+
+function trustedProductImage(value: string | null | undefined, productUrl: string): URL | null {
+  const amazon = amazonImage(value);
+  try {
+    const product = httpsUrl(productUrl);
+    if (amazonHost(product)) return amazon;
+    const image = value ? httpsUrl(value) : null;
+    if (image && /^(?:www\.)?yodobashi\.com$/.test(product.hostname)
+        && image.hostname === 'image.yodobashi.com' && image.pathname.startsWith('/product/')) return image;
+  } catch { /* Unsupported hint. */ }
+  return null;
 }
 
 /** Conservative public-unicast allowlist, excluding mapped and transition IPv6. */
@@ -211,7 +224,7 @@ export function createProductPreview(deps: Dependencies = dependencies) {
   async function retrieve(productUrl: string, signal: AbortSignal, imageHint?: string | null, needPrice = false): Promise<PreviewImage | null> {
     try {
       const product = httpsUrl(productUrl);
-      let imageUrl = amazonHost(product) ? amazonImage(imageHint) : null;
+      let imageUrl = trustedProductImage(imageHint, productUrl);
       if (!imageUrl || needPrice) {
         try {
           const page = await read(product, amazonHost(product) ? AMAZON_HTML_LIMIT : HTML_LIMIT, signal);
@@ -229,7 +242,7 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     } catch { return null; }
   }
   async function fetchProductImage(productUrl: string, imageHint?: string | null, needPrice = false): Promise<PreviewImage | null> {
-    const hint = amazonImage(imageHint);
+    const hint = trustedProductImage(imageHint, productUrl);
     if (hint) {
       if (imageHints.size >= 64) imageHints.delete(imageHints.keys().next().value!);
       imageHints.set(productUrl, hint.href);
@@ -257,7 +270,7 @@ export function createProductPreview(deps: Dependencies = dependencies) {
       for (let i = 0; i <= 3; i++) {
         controller.signal.throwIfAborted();
         const host = url.hostname;
-        if ((host === 'amazon.co.jp' || host === 'www.amazon.co.jp') && /\/(?:dp|gp\/product)\/[A-Z0-9]{10}(?:[/?]|$)/i.test(url.pathname)) return url.href;
+        if (isRetailProductUrl(url.href)) return url.href;
         // Only resolve the search engine's source redirect or Amazon's own short links.
         if (!['vertexaisearch.cloud.google.com', 'www.google.com', 'google.com', 'amzn.to', 'amazon.co.jp', 'www.amazon.co.jp'].includes(host)) return null;
         const addresses = await deps.resolve(host);
@@ -281,7 +294,7 @@ export function createProductPreview(deps: Dependencies = dependencies) {
           if (!target) continue;
           try {
             const destination = httpsUrl(target, url);
-            if (amazonHost(destination) && /\/(?:dp|gp\/product)\/[A-Z0-9]{10}(?:[/?]|$)/i.test(destination.pathname)) destinations.add(destination.href);
+            if (isRetailProductUrl(destination.href)) destinations.add(destination.href);
           } catch { /* Ignore unsupported destinations. */ }
         }
         return destinations.size === 1 ? destinations.values().next().value! : null;
@@ -301,14 +314,8 @@ export function createProductPreview(deps: Dependencies = dependencies) {
   async function prepareProduct(product: ProductCandidate): Promise<ProductCandidate | null> {
     const productUrl = await resolveAmazonProductUrl(product.productUrl);
     if (productUrl) return enrichProduct({ ...product, productUrl });
-    // 検索サービスの引用URLを解決できなくても、検索済み候補は残す。
-    // 未確認のAmazon URLは生成せず、引用された出典リンクをそのまま保持する。
-    try {
-      const source = httpsUrl(product.productUrl);
-      if (source.hostname !== 'vertexaisearch.cloud.google.com' || !source.pathname.startsWith('/grounding-api-redirect/')
-          || !product.sourceUrls.includes(product.productUrl)) return null;
-      return { ...product, imageUrl: null, recommendationReason: product.recommendationReason + ' 商品ページへの接続は未確認です。出典で確認してください。' };
-    } catch { return null; }
+    // 不透明な検索出典を商品扱いしない。記事やQ&Aへの転送は候補から除く。
+    return null;
   }
   async function fetchResolvedProductImage(value: string): Promise<PreviewImage | null> {
     const resolved = await resolveAmazonProductUrl(value);

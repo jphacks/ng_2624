@@ -6,9 +6,20 @@ import { selectRewards } from './rewards.ts';
 import { publicUrl } from './validation.ts';
 import { ConversationError } from './errors.ts';
 import { searchAmazon } from './amazon.ts';
+import { searchRetail } from './retail.ts';
+import { isRetailProductUrl } from '../shared/product-source.ts';
 
-// 直接取得8秒 + 補助検索20秒・整形10秒を最大2回。会話生成と合わせてもHTTPの150秒以内。
-export const SEARCH_BUDGET_MS = 75_000;
+// 販売店の直接取得は各8秒。その後の補助検索も含め、会話生成とHTTPの150秒に収める。
+export const SEARCH_BUDGET_MS = 85_000;
+
+/** 不透明な検索出典は後段で解決する。判別できるURLは実商品のページだけを許可する。 */
+export function isProductSourceUrl(value: string): boolean {
+    const safe = publicUrl(value);
+    if (!safe) return false;
+    const url = new URL(safe);
+    if (url.hostname === 'vertexaisearch.cloud.google.com' && url.pathname.startsWith('/grounding-api-redirect/')) return true;
+    return isRetailProductUrl(safe);
+}
 
 /** 価格は、選択した出典に紐づく引用に円表記の同額があるときだけ採用。 */
 function supportedPrice(price: number | null, quote: string | null, sourceIds: string[], result: GenerationResult): number | null {
@@ -40,7 +51,7 @@ export async function searchProducts(
         })]);
         controller.signal.throwIfAborted();
         const successful = results.filter((r): r is PromiseFulfilledResult<GenerationResult> => r.status === 'fulfilled');
-        const directAmazon = searchProvider === searchAmazon || successful.some(({ value }) => value.candidates !== undefined);
+        const directAmazon = searchProvider === searchAmazon || searchProvider === searchRetail || successful.some(({ value }) => value.candidates !== undefined);
         if (!successful.length && !directAmazon) {
             const failed = results.find(r => r.status === 'rejected');
             if (failed?.status === 'rejected') throw failed.reason;
@@ -84,11 +95,11 @@ export async function searchProducts(
             for (const item of parseProducts(extracted.text)) {
                 const source = search.sources.find(source => source.id === item.productSourceId);
                 // 未知の出典を混ぜた候補は捨てる。URLをモデルに自由生成させない。
-                if (!source || !item.sourceIds.length || !item.sourceIds.includes(source.id)
+                if (!source || !isProductSourceUrl(source.url) || !item.sourceIds.length || !item.sourceIds.includes(source.id)
                     || item.sourceIds.some(id => !search.sources.some(source => source.id === id))) continue;
                 const productUrl = publicUrl(source.url)!;
                 if (usedUrls.has(productUrl)) continue;
-                const priceJpy = supportedPrice(item.priceJpy, item.priceEvidence, item.sourceIds, result);
+                const priceJpy = supportedPrice(item.priceJpy, item.priceEvidence, [source.id], result);
 
                 products.push({
                     id: createId(), name: item.name, priceJpy, productUrl, imageUrl: null,
@@ -104,8 +115,8 @@ export async function searchProducts(
         for (let attempt = 0; attempt < 2 && best.products.length < 3; attempt++) {
             try {
                 const request = buildSearchRequest(query, input);
-                request.systemInstruction += '\n直接取得では候補が不足しました。価格・機能・ブランドの条件を緩め、主要用途に近いAmazonの商品詳細ページを3件探してください。価格未確認でも実商品の出典があれば含め、未確認と明記してください。既に見つかった商品とは異なる商品を優先してください。';
-                request.input = JSON.stringify({ ...JSON.parse(request.input), existingProducts: best.products.map(p => ({ name: p.name, productUrl: p.productUrl })), retry: attempt > 0 });
+                request.systemInstruction += '\n直接取得では候補が不足しました。Amazonが見つからなければ楽天市場・ヨドバシ・ビックカメラ・メーカー公式ストアで購入できる個別商品を探してください。価格・機能・ブランドの条件を緩め、主要用途に近い実商品を3件探してください。価格未確認でも実商品の販売ページの出典があれば含め、未確認と明記してください。既に見つかった商品とは異なる商品を優先してください。';
+                request.input = JSON.stringify({ ...JSON.parse(request.input), query: `${query} ${attempt === 0 ? 'site:item.rakuten.co.jp' : 'site:yodobashi.com/product/ OR site:biccamera.com/bc/item/'}`, existingProducts: best.products.map(p => ({ name: p.name, productUrl: p.productUrl })), retry: attempt > 0 });
                 successful.push({ status: 'fulfilled', value: await generate({ ...request, timeoutMs: 20_000, signal: controller.signal }) });
                 const found = await collect();
                 // 再整形で候補が減っても、取得済みの実商品を捨てない。

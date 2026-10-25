@@ -113,8 +113,8 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   assert.match(captured.message,/これまでの相談内容/);
   assert.ok(captured.history.some((m:any)=>m.sender==='user'&&m.content.includes('Switch スプラトゥーン')));
  });
- await t.test('ゲームの引用URLを解決できなくても3候補を保存しAPIから表示できる',async()=>{
-  const preview=createProductPreview({resolve:async()=>[{address:'93.184.216.34',family:4}],read:async()=>{throw Error('search source unavailable');}});
+ await t.test('検索の引用URLが販売商品ページに転送されれば3候補を保存して表示できる',async()=>{
+  const preview=createProductPreview({resolve:async()=>[{address:'93.184.216.34',family:4}],read:async url=>{if(url.hostname==='vertexaisearch.cloud.google.com')return {status:302,headers:{location:'https://www.amazon.co.jp/dp/B00000000'+url.pathname.slice(-1)},body:Buffer.alloc(0)};throw Error('image unavailable');}});
   const searchApp=createApp(config,{db,ai:async input=>({requestId:input.requestId,action:'PRODUCT',reply:'ゲームの候補です',search:null,
    products:([ 'small','medium','large' ] as const).map((size,i)=>({id:id(200+i),size,name:`ゲーム${i+1}`,priceJpy:null,priceCheckedAt:null,
     productUrl:`https://vertexaisearch.cloud.google.com/grounding-api-redirect/game-${i}`,sourceUrls:[`https://vertexaisearch.cloud.google.com/grounding-api-redirect/game-${i}`],description:'検索で確認した候補',recommendationReason:'候補です'}))}),
@@ -125,7 +125,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   const payload=await response.json();assert.equal(response.status,200,JSON.stringify(payload));
   assert.equal(payload.data.products.length,3);assert.equal(payload.data.latestAIOutput.action,'PRODUCT');
   const saved=await call('/conversations/'+c.data.conversationId);assert.equal(saved.data.products.length,3);
-  assert.ok(saved.data.products.every((p:any)=>p.imageUrl===null&&p.recommendationReason.includes('接続は未確認')));
+  assert.ok(saved.data.products.every((p:any)=>p.imageUrl===null&&p.productUrl.startsWith('https://www.amazon.co.jp/dp/')));
  });
  await t.test('saved candidates recover verified prices and images before proposal generation; failed candidates remain',async()=>{
   const candidates=Array.from({length:3},(_,i)=>({id:id(230+i),name:`復元商品${i}`,priceJpy:null,priceCheckedAt:null,imageUrl:null,size:'small' as const,productUrl:`https://www.amazon.co.jp/dp/B00000023${i}`,description:'',recommendationReason:'',sourceUrls:[]}));
