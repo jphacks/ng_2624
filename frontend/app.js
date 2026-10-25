@@ -21,7 +21,7 @@ const status=v=>labels[v]||v||'';
 const state={session:null,childId:null,dashboard:null,chat:null,proposal:null,busy:false,epoch:0,dirty:false,routeHash:location.hash,invitation:null,goalOrder:[],pairingId:sessionStorage.getItem('pairingRequestId')};
 const parent=()=>state.session?.user?.role==='parent';
 function notice(text='',error=false){$('#notice').textContent=text;$('#notice').className=error?'global-notice form-error':'global-notice';}
-function render(html){state.dirty=false;$('#content').classList?.remove('chat-layout-fixed-v2','chat-layout-v3');$('#content').innerHTML=html;$('#content').setAttribute('aria-busy','false');}
+function render(html){state.dirty=false;$('#content').innerHTML=html;$('#content').setAttribute('aria-busy','false');}
 function nav(){ const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=`<a href="#home">ホーム</a><a href="#conversations">ぽぽに相談</a><a href="#settings">${parent()?'設定':'じぶんの設定'}</a>`; }
 function product(p,action=''){
  if(!p)return '';const src=image(p.imageUrl),target=url(p.productUrl);
@@ -38,77 +38,12 @@ async function conversations(){
  let children=[];
  if(parent()){
   children=(await api('/children')).children;
-  if(!children.some(c=>c.childId===state.childId)){
-   state.childId=children[0]?.childId||null;
-   state.goalOrder=[];
-  }
-  if(!state.childId){
-   render('<h1>ぽぽに相談</h1><p>先に子どもを登録してください。</p><a href="#children">子ども一覧へ</a>');
-   return;
-  }
+  if(!children.some(c=>c.childId===state.childId)){state.childId=children[0]?.childId||null;state.goalOrder=[];}
+  if(!state.childId){render('<h1>ぽぽに相談</h1><p>先に子ども一覧から子どもを登録してください。</p><a href="#children">子ども一覧へ</a>');return;}
  }
-
- const [d,n]=await Promise.all([
-  api('/conversations'+(parent()?'?childId='+encodeURIComponent(state.childId):'')),
-  api('/negotiations')
- ]);
-
- const conversations=[...(d.conversations||[])].sort(
-  (a,b)=>new Date(b.updatedAt||0)-new Date(a.updatedAt||0)
- );
- const negotiations=(n.negotiations||[]).filter(
-  x=>!parent()||x.childId===state.childId
- );
-
- state.chatThreads={conversations,negotiations,children};
-
- const latest=conversations[0];
-
- if(latest){
-  const id=encodeURIComponent(latest.conversationId);
-  const detail=await api('/conversations/'+id);
-  return renderChat(detail);
- }
-
- const created=await api(
-  '/conversations',
-  'POST',
-  parent()&&state.childId?{childId:state.childId}:{}
- );
- const id=encodeURIComponent(created.conversationId);
- return renderChat(await api('/conversations/'+id));
+ const [d,n]=await Promise.all([api('/conversations'+(parent()?'?childId='+encodeURIComponent(state.childId):'')),api('/negotiations')]);
+ render(`${parent()?selector(children):''}<h1>ぽぽに相談</h1><p>個別相談は本人だけ、共有交渉は参加する親子に表示されます。${parent()?'お手伝いの依頼・承認は、子ども一覧の「目標・お手伝いを確認」から行います。':'お手伝いの報告はホームで行います。'}</p><h2>個別相談</h2>${btn('新しい個別相談を準備する','new-chat')}${(d.conversations||[]).map(c=>`<article class="flow-card"><p>${esc(date(c.updatedAt))}</p>${btn('個別相談を開く','open-chat',c.conversationId)}</article>`).join('')||empty('まだ個別相談はありません。')}<h2>共有交渉</h2><p>提案へのNo・修正依頼で開始します。最初の提案への賛成なら交渉は不要です。</p>${(n.negotiations||[]).filter(x=>!parent()||x.childId===state.childId).map(x=>`<article class="flow-card"><p>${esc(status(x.status))}</p>${btn('共有交渉を開く','open-negotiation',x.negotiationId)}</article>`).join('')||empty('共有交渉はまだありません。')}`);
 }
-
-function chatSwitcher(){
- const threads=state.chatThreads;
- if(!threads)return '';
-
- const personal=threads.conversations.map(
-  (c,i)=>btn(
-   i===0?'最近の相談':'過去の相談 '+(i+1),
-   'open-chat',
-   c.conversationId
-  )
- ).join('');
-
- const shared=threads.negotiations.map(
-  (n,i)=>btn(
-   '親子で共有するチャット '+(i+1),
-   'open-negotiation',
-   n.negotiationId
-  )
- ).join('');
-
- return `<details class="chat-switcher">
-  <summary>チャットを切り替える</summary>
-  <p>個別相談は本人だけに表示されます。共有チャットは親子に公開されます。</p>
-  ${parent()?selector(threads.children):''}
-  ${btn('新しい個別相談を準備する','new-chat')}
-  ${personal}
-  ${shared||'<p>共有チャットはまだありません。</p>'}
- </details>`;
-}
-
 const chatPath=()=>state.chat.mode==='negotiation'?'/negotiations/'+path(state.chat.negotiationId):'/conversations/'+path(state.chat.conversationId);
 function chatMessage(m){
  const assistant=m.sender==='assistant', own=m.own??m.sender==='user';
@@ -121,14 +56,9 @@ function renderChat(d){
  const shared=d.mode==='negotiation', active=d.canMessage===true;
  const intro=shared?'ぽぽです。ここでは、この商品の購入条件を親子で話し合います。ここへの発言と返答は親子に公開されます。個別相談の履歴は共有しません。':parent()?'ぽぽです。お子さんの目標に関する予算や購入条件を一緒に整理します。この個別相談はあなたにだけ表示されます。':'ぽぽだよ。ほしいものや、その理由を一緒に整理しよう。この個別相談はあなたにだけ見えるよ。';
  const phaseLabel={not_started:'開始前',consultation:'個別相談中',negotiation:'共有交渉中',awaiting_response:'提案への返事待ち',closed:'終了'}[d.phase]||'閲覧のみ';
- render(`<div class="chat-intro"><span class="dove" aria-hidden="true"></span><div><h1>ぽぽとチャット</h1><p>${shared?'親子に公開されるチャット':'あなただけのチャット'} ・ ${esc(phaseLabel)}</p></div></div><div class="chat-scroll-area">${chatSwitcher()}<div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${(d.messages ?? []).map(chatMessage).join('')}</div>${shared&&d.proposalView?.negotiationResult?.reason?`<p class="flow-card">No・修正依頼の理由：${esc(d.proposalView.negotiationResult.reason)}</p>`:''}${d.phase==='not_started'?`<p>内容と公開範囲を確認してから開始してください。</p>${btn('個別相談を開始する','start-chat')}`:''}${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${d.products?.length?`<section class="product-list">${d.products.map(p=>product(p,active?'select-product':'')).join('')}</section>`:''}${active&&d.selectedProductId?`<p>選択中：${esc(d.products.find(p=>p.id===d.selectedProductId)?.name||'')}</p>${btn(shared?'修正提案の下書きを作る':'この商品の提案を作る','generate-proposal')}`:''}${d.draftProposal?btn('自分の下書きを確認・編集する','proposal',d.draftProposal.id):''}${d.currentProposal?btn(shared?'対象の提案を確認する':'保存済みの提案を確認する','proposal',d.currentProposal.id):''}</div><div class="chat-fixed-footer">${active&&!shared?`${btn('🔎 そろそろ商品を探す','search-product-now')}`:''}${active?form('message',area(shared?'親子に公開するメッセージ':'ぽぽへのメッセージ','message','',true),'送信する'):empty(d.phase==='awaiting_response'?'相手の返事を待っています。このフェーズではメッセージを送れません。':d.phase==='closed'?'この相談・交渉は終了しました。履歴だけ確認できます。':d.phase==='negotiation'&&!shared?'個別相談は終了しました。続きは共有交渉で話し合ってください。':'')}</div>`);
- $('#content').classList?.add('chat-layout-v3');
+ render(`<a class="back-link" href="#conversations">← 相談・交渉一覧</a><div class="chat-intro"><span class="dove" aria-hidden="true"></span><div><h1>${shared?'ぽぽと共有交渉':'ぽぽと個別相談'}</h1><p>${esc(phaseLabel)}</p></div></div><div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${d.messages.map(chatMessage).join('')}</div>${shared&&d.proposalView?.negotiationResult?.reason?`<p class="flow-card">No・修正依頼の理由：${esc(d.proposalView.negotiationResult.reason)}</p>`:''}${d.phase==='not_started'?`<p>内容と公開範囲を確認してから開始してください。</p>${btn('個別相談を開始する','start-chat')}`:''}${active?form('message',area(shared?'親子に公開するメッセージ':'ぽぽへのメッセージ','message','',true),'送信する'):empty(d.phase==='awaiting_response'?'相手の返事を待っています。このフェーズではメッセージを送れません。':d.phase==='closed'?'この相談・交渉は終了しました。履歴だけ確認できます。':d.phase==='negotiation'&&!shared?'個別相談は終了しました。続きは共有交渉で話し合ってください。':'')}${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${active&&!shared?`<details><summary>商品を探す・探し直す</summary><p>商品名や用途だけを入力してください。名前や家庭の事情は書かないでください。</p>${form('search-products',field('商品名・用途（例：Switch スプラトゥーン）','query','','text',true),'この内容で商品を探す')}</details>`:''}${d.products?.length?`<section class="product-list">${d.products.map(p=>product(p,active?'select-product':'')).join('')}</section>`:''}${active&&d.selectedProductId?`<p>選択中：${esc(d.products.find(p=>p.id===d.selectedProductId)?.name||'')}</p>${btn(shared?'修正提案の下書きを作る':'この商品の提案を作る','generate-proposal')}`:''}${d.draftProposal?btn('自分の下書きを確認・編集する','proposal',d.draftProposal.id):''}${d.currentProposal?btn(shared?'対象の提案を確認する':'保存済みの提案を確認する','proposal',d.currentProposal.id):''}`);
 }
-async function chat(id){
- const key=encodeURIComponent(id);
- const detail=await api('/conversations/'+key);
- renderChat(detail);
-}
+async function chat(id){renderChat(await api('/conversations/'+encodeURIComponent(id)));}
 async function negotiation(id){renderChat(await api('/negotiations/'+encodeURIComponent(id)));}
 async function proposal(id){const v=await api('/proposals/'+encodeURIComponent(id)),p=v.proposal;state.proposal=v;const prod=v.product||state.chat?.products?.find(x=>x.id===p.productId)||state.dashboard?.proposals?.find(x=>x.proposal.id===id)?.product;render(`<a class="back-link" href="#home">← ${parent()?'子ども一覧':'ホーム'}</a><h1>商品の提案</h1>${product(prod)}<p>${esc(status(p.status))} ・第${p.version}版</p>${p.status==='draft'&&v.canEdit!==false?form('edit-proposal',area('お願いのことば','persuasionText',p.persuasionText,true)+area('やくそく（1行に1つ）','purchaseConditions',p.purchaseConditions.join('\n')),'下書きを保存する',p.id)+btn('この内容を相手に送る','send-proposal',p.id):`<div class="review-text">${esc(p.persuasionText)}</div><ul>${p.purchaseConditions.map(c=>`<li>${esc(c)}</li>`).join('')}</ul>`}${p.status==='pending'&&v.canRespond?form('respond-proposal',`<label>返事<select name="decision"><option value="approved">この内容に賛成する</option><option value="revision_requested">修正をお願いする</option><option value="rejected">見送る</option></select></label>${area('理由（修正・見送り時は必須）','reason')}`,'第'+p.version+'版に返事する',p.id):''}${v.negotiationResult?.reason?`<p>返事：${esc(v.negotiationResult.reason)}</p>`:''}${v.canConsult?btn('共有交渉へ進む','consult-proposal',p.id):''}${['agreed','superseded'].includes(p.status)?'<p>この提案の相談・交渉は終了しています。</p>':''}`);}
 const gender=(value=null)=>`<label class="field-label">性別<select name="gender"><option value="">回答しない</option><option value="male" ${value==='male'?'selected':''}>男性</option><option value="female" ${value==='female'?'selected':''}>女性</option><option value="other" ${value==='other'?'selected':''}>その他</option></select></label>`;
@@ -179,12 +109,6 @@ async function action(a,id){
  if(a==='open-chat')return go('#conversation/'+id);
  if(a==='proposal')return go('#proposal/'+id);
  if(a==='consult-proposal'){const d=await api('/proposals/'+path(id));if(!d.canConsult)throw new Error('共有交渉は開始前、回答待ち、または終了しています。');return go('#negotiation/'+d.negotiationId);}
- if(a==='search-product-now'){
-  notice('これまでの会話から商品を探しています…');
-  return renderChat(await api(chatPath()+'/search','POST',{
-    query:'これまでのチャットで相談した商品名・用途・予算・希望条件を踏まえ、購入候補を提案してください。名前や家庭の個人的な事情は検索条件に含めないでください。'
-  }));
-}
  if(a==='select-product')return renderChat(await api(chatPath()+'/selected-product','PATCH',{selectedProductId:id}));
  if(a==='generate-proposal'){
   const shared=state.chat.mode==='negotiation', before=shared?state.chat.draftProposal:state.chat.currentProposal;
@@ -222,7 +146,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');
 document.addEventListener('input',e=>{if(e.target.closest('[data-form="edit-proposal"]'))state.dirty=true;});
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
 document.addEventListener('submit',e=>{const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();const data=Object.fromEntries(new FormData(f));run(()=>submit(f.dataset.form,f.dataset.id,data),f);});
-document.addEventListener('change',e=>{if(e.target.id==='child-selector'){state.childId=e.target.value;state.goalOrder=[];if(parent()&&location.hash.startsWith('#child-home/')){void go('#child-home/'+path(state.childId));}else if(parent()&&/^#(?:conversation|negotiation)\//.test(location.hash)){void go('#conversations');}else void navigate();}});
+document.addEventListener('change',e=>{if(e.target.id==='child-selector'){state.childId=e.target.value;state.goalOrder=[];if(parent()&&location.hash.startsWith('#child-home/')){void go('#child-home/'+path(state.childId));}else void navigate();}});
 document.addEventListener('error',e=>{if(e.target.matches?.('.product-image')){e.target.hidden=true;const fallback=e.target.nextElementSibling;if(fallback)fallback.hidden=false;}},true);
 window.addEventListener('hashchange',()=>{if(!canLeave()){history.replaceState(null,'',state.routeHash||'#home');return;}void navigate();});
 run(async()=>{state.session=await api('/auth/session');const token=new URLSearchParams(location.hash.slice(1)).get('invitationToken');if(token){if(state.session.authenticated){history.replaceState(null,'','#home');await route();notice('ログイン中です。子どもの別端末または別ブラウザーで招待を開いてください。',true);return;}history.replaceState(null,'','/pairing');await pair(token);history.replaceState(null,'','#pairing');return;}if(new URLSearchParams(location.search).has('authError')){history.replaceState(null,'',location.pathname+location.hash);await route();notice('ログインできませんでした。もう一度お試しください。',true);return;}await route();});
