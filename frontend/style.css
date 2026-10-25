@@ -847,6 +847,7 @@ button:disabled { cursor: wait; opacity: .6; }
 a { text-underline-offset: 3px; }
 h1[tabindex="-1"]:focus { outline: none; }
 .app {
+  position: relative;
   max-width: 540px;
   margin: 24px auto;
   min-height: calc(100dvh - 48px);
@@ -1262,18 +1263,18 @@ body:has(#content.chat-layout-v3) {
 }
 #navigation a { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 8px 4px; text-align: center; font-size: 13px; }
 #navigation .nav-icon { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-/* On narrow phones, stack the icon above the label so all four fit. */
+/* On narrow phones, stack each icon above its label. */
 @media (max-width: 420px) {
   #navigation a { flex-direction: column; gap: 3px; padding: 6px 2px; font-size: 11px; line-height: 1.2; }
   #navigation .nav-icon { width: 20px; height: 20px; }
 }
 
-/* Demo tools must not affect the normal screen layout. */
+/* Anchor the labels to the app panel without affecting its layout. */
 .demo-tools {
-  position: fixed;
+  position: absolute;
   z-index: 101;
   top: 8px;
-  right: max(8px, calc((100vw - 540px) / 2 + 8px));
+  right: 8px;
   padding: 4px 8px;
   border: 1px solid #dcecf0;
   border-radius: 8px;
@@ -1285,10 +1286,10 @@ body:has(#content.chat-layout-v3) {
 .demo-tools[hidden] { display: none; }
 
 .role-label {
-  position: fixed;
+  position: absolute;
   z-index: 101;
   top: 8px;
-  left: max(8px, calc((100vw - 540px) / 2 + 8px));
+  left: 8px;
   padding: 4px 8px;
   border-radius: 8px;
   background: #edf9f3;

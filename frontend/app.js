@@ -23,7 +23,7 @@ const state={session:null,childId:null,dashboard:null,chat:null,proposal:null,bu
 const parent=()=>state.session?.user?.role==='parent';
 function notice(text='',error=false){$('#notice').textContent=text;$('#notice').className=error?'global-notice form-error':'global-notice';}
 function render(html){state.dirty=false;$('#content').classList?.remove('chat-layout-fixed-v2','chat-layout-v3');$('#content').innerHTML=html;$('#content').setAttribute('aria-busy','false');}
-function nav(){ const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=navLink('#home','home','ホーム')+navLink('#chores','hand','お手伝い')+navLink('#conversations','chat','ぽぽに相談')+navLink('#settings','gear',parent()?'設定':'じぶんの設定'); }
+function nav(){ const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=navLink('#home','home','ホーム')+navLink('#conversations','chat','ぽぽに相談')+navLink('#settings','gear','設定'); }
 // Line icons for the bottom bar: house, hand, speech bubble, gear.
 const navIcons={
  home:'<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -45,7 +45,7 @@ const noChild=d=>parent()&&!d.childId?empty('子ども一覧から子どもを�
 // Home shows only the points and the wish list.
 async function home(){
  const d=await dashboard();
- render(`<h1 class="page-title">${esc(parent()?childName(d):state.session.user.displayName)}${parent()?'の目標・お手伝い':'、おかえり！'}</h1>${parent()?selector(d.children):''}${noChild(d)}<div class="points-oval"><span class="points-label">ありがとうポイント</span><span class="points-value">${num(d.balanceYen)}<small>pt</small></span></div><p class="pace">1ポイント＝1円 ・${parent()?'これまで ':'累計：'}${points(d.lifetimeEarnedYen)}${parent()?`<br>最近の週平均：${points(d.weeklyPaceYen)}`:''}</p><section class="goals"><h2>${parent()?'子どもの目標':'ほしいもの'}</h2>${goals(d)}</section>${btn('最新の状態に更新','reload')}`);
+ render(`<h1 class="page-title">${esc(parent()?childName(d):state.session.user.displayName)}${parent()?'の目標・お手伝い':'、おかえり！'}</h1>${parent()?selector(d.children):''}${noChild(d)}<div class="points-oval"><span class="points-label">ありがとうポイント</span><span class="points-value">${num(d.balanceYen)}<small>pt</small></span></div><p class="pace">1ポイント＝1円 ・${parent()?'これまで ':'累計：'}${points(d.lifetimeEarnedYen)}${parent()?`<br>最近の週平均：${points(d.weeklyPaceYen)}`:''}</p><section class="goals"><h2>${parent()?'子どもの目標':'ほしいもの'}</h2>${goals(d)}</section><a class="btn-pill login-link" href="#chores">お手伝いを確認する</a>${btn('最新の状態に更新','reload')}`);
 }
 // Chores, chore requests and product proposals live on their own screen.
 async function chores(){
