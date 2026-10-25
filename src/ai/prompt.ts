@@ -2,6 +2,8 @@ import type { AIInput, GoalSize, NegotiationContext, ProductSearchContext, Searc
 import { DECISION_SCHEMA, PRODUCTS_SCHEMA } from './protocol.ts';
 import type { JsonSchema } from './protocol.ts';
 
+export const CONVERSATION_SEARCH_MESSAGE = 'これまでの相談内容から、希望に近い商品の検索へ進んでください。検索語には商品名・用途だけを含め、名前や家庭の事情は含めないでください。';
+
 export interface ConversationRequest {
     systemInstruction: string;
     input: string;

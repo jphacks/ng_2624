@@ -26,7 +26,7 @@ export async function searchProducts(
     let timer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-            const error = new ConversationError('TIMEOUT', '商品検索が時間内に完了しませんでした。検索条件を絞って再度お試しください。');
+            const error = new ConversationError('TIMEOUT', '商品検索が時間内に完了しませんでした。もう一度商品検索をお試しください。');
             controller.abort(error);
             reject(error);
         }, SEARCH_BUDGET_MS);
@@ -59,6 +59,19 @@ export async function searchProducts(
             }
         }
         search.searchSuggestionsHtml = [...suggestions].join('\n') || null;
+        // Amazonで取得済みの実商品は、モデルの再選別によって空にしない。
+        if (successful.length && successful.every(({ value }) => value.candidates !== undefined)) {
+            const unique = new Map<string, Omit<ProductCandidate, 'size'>>();
+            for (const { value } of successful) for (const candidate of value.candidates!) {
+                if (!unique.has(candidate.productUrl)) unique.set(candidate.productUrl, { ...candidate, id: createId(), priceCheckedAt: input.now });
+            }
+            const products = selectRewards([...unique.values()], input.rewardGuidelines, true);
+            for (const product of products) {
+                const amount = input.rewardGuidelines[`${product.size}Jpy`]!;
+                if (product.priceJpy! < amount * .8 || product.priceJpy! > amount * 1.2) product.recommendationReason += ' この区分の目安金額±20％を外れています。';
+            }
+            return { products, search };
+        }
         if (!search.sources.length) return { products: [], search };
         const extracted = await generate({ ...buildExtractionRequest(result.text, search, input, result.evidence), timeoutMs: 10_000, signal: controller.signal });
         controller.signal.throwIfAborted();

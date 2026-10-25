@@ -334,6 +334,7 @@ test('new unified chat uses existing create, start and product search endpoints'
  assert.equal(JSON.stringify(posts),JSON.stringify([{path:'/conversations',body:{}},{path:'/conversations/new/start',body:{}}]));
  assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
  await ui.action('search-product-now');
+ assert.equal(ui.nodes['#notice'].textContent,'');
  assert.equal(posts.at(-1)?.path,'/conversations/new/search');
  assert.equal(posts.at(-1)?.body.fromConversation,true);assert.equal(posts.at(-1)?.body.query,undefined);
  assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
