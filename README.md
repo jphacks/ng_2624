@@ -1,36 +1,150 @@
-# サンプル（プロダクト名）
+# ふぁみぽぽ
+
+**がんばりと「ほしい」を、親子でつなぐ。**
 
 [![IMAGE ALT TEXT HERE](https://jphacks.com/wp-content/uploads/2026/07/IMG_5316.png)](https://www.youtube.com/watch?v=piaNsc6ilBI)
 
 ## 製品概要
+
+子どもがお手伝いでためた「ありがとうポイント」と、子どもの「ほしいもの」を、AIのぽぽが間に入ってつなぐアプリです。
+子どもはぽぽに相談しながら、ほしいものと、そのためのやくそくを自分で提案します。親はその提案に返事をします。
+
 ### 背景(製品開発のきっかけ、課題等）
+
+ほしいものの話になると、子どもは理由やがんばれることをうまく言葉にできません。親は、頭ごなしに断るか、なんとなく買ってしまうかになりがちです。
+また、親が「買ってあげる」と決める形だと、断ったときに親子の関係が気まずくなります。
+
+ふぁみぽぽでは、子どもが自分で考えた提案を親に届けます。親は条件つきで答え、だめなときは理由を伝えます。お手伝いのがんばりが、そのまま「ほしい」に近づく仕組みにしました。
+
 ### 製品説明（具体的な製品の説明）
+
+1. **親子をつなぐ**：保護者がGoogleでログインして子どもを登録し、招待QR（または招待コード）を出します。子どもの端末で読み取り、親子の画面に出る6桁の確認番号を親が照合して承認すると、つながります。
+2. **お手伝いでポイントをためる**：親がお手伝いを頼むか、子どもがやりたいお手伝いを提案します。子どもが「できた」と報告し、親が承認すると、ありがとうポイント（1ポイント＝1円）が入ります。
+3. **ぽぽに相談する**：子どもは、ほしいものやその理由を、ぽぽと二人だけで相談します（個別相談）。ぽぽは実際の商品を検索して、候補を出します。
+4. **提案を送る**：商品を1つ選ぶと、ぽぽが「おねがい」と「やくそく」の下書きを作ります。子どもが自分で直してから親に送ります。
+5. **親が返事をする**：親は「賛成／修正をお願い／見送る」で答えます。修正・見送りには理由が必要です。修正をお願いすると、親子とぽぽで話し合う「共有交渉」が始まり、修正版の提案をもう一度送り合います。
+6. **目標になる**：賛成すると、その商品が目標（大・中・小）になり、ホームに「あと何ポイント」「あと約何日」が出ます。買ったら親が「購入済み」にして、ポイントから引かれます。
+
 ### 特長
-#### 1. 特長1
-#### 2. 特長2
-#### 3. 特長3
+
+#### 1. がんばりが「ほしい」に近づく
+
+お手伝いの承認でポイントがたまり、目標までの残りと、最近のペースから見た達成の目安が見えます。目標は大・中・小に分けて、遠すぎる目標だけにならないようにしています。
+
+#### 2. AIのぽぽが、子どもの「ほしい」を言葉にする
+
+ぽぽが子どもの話を聞き、実際の商品を検索して、親に送る提案文とやくそくの下書きまで手伝います。親が決めた予算の目安を超える商品や、価格・条件が確かめられない商品は、下書きに進みません。
+
+#### 3. 本音で相談できる、見える範囲の分け方
+
+個別相談は本人にだけ見え、相手には見えません。親子で話し合う共有交渉には、送った提案と返事の理由など、共有した内容だけが使われます。AIにも、交渉のときは個別相談の中身を渡しません。
 
 ### 解決出来ること
+
+- 子どもが、自分のほしいものを理由とやくそくつきで伝えられる
+- 親が、頭ごなしに断らず、条件や理由をつけて答えられる
+- お手伝いのがんばりが、ポイントと目標として目に見える
+- 「買う／買わない」の話し合いが、親子げんかではなく交渉になる
+
 ### 今後の展望
+
+- 子どもの取り組み方（続けた日数・期限を守れたか など）に合わせて、商品の出し方を変える（[present_instruction.md](present_instruction.md) の方針）
+- 親が複数いる家庭や、きょうだいへの対応を強くする
+- 公開環境での運用（複数台のサーバーでのリクエスト制限の共有など）
+
 ### 注力したこと（こだわり等）
-* 
-* 
+
+* 個別相談と共有交渉を分け、誰に何が見えるかを画面・サーバー・DB・AIのすべてで守ったこと
+* ポイントの加算・購入時の引き落とし・提案の版の管理を、DBのトランザクションで二重に起きないようにしたこと
+* 子どもに外部の販売サイトのリンクを見せず、商品の確認は親が販売元で行う作りにしたこと
+
+## 全体の構成
+
+```mermaid
+flowchart LR
+  B["ブラウザー<br>frontend/"] -- "/api（同じURL）" --> S["Node.js サーバー<br>src/server/"]
+  S --> AI["会話AI<br>src/ai/"]
+  AI --> G["Gemini API<br>Google Search"]
+  S --> DB["Supabase<br>PostgreSQL・Auth"]
+  S --> P["商品ページ<br>（画像の取得）"]
+```
+
+- ブラウザーが話す相手は、同じURLの Node.js サーバーだけです。Gemini や Supabase のキーはサーバーだけが持ち、画面には渡しません。
+- サーバーがログイン・権限・保存を受け持ち、AIへの入力を作って `src/ai` を呼びます。
+- AIは入力を受け取って返事を返すだけで、DBには触りません。
+
+### フォルダ構成
+
+| フォルダ・ファイル | 内容 | 詳しい説明 |
+|---|---|---|
+| [frontend/](frontend/) | 画面（HTML / CSS / JavaScript、ビルドなし） | [docs/frontend-design.md](docs/frontend-design.md) |
+| [src/server/](src/server/) | バックエンド。画面の配信とAPI、ログイン、商品画像の取得 | [SETUP.md](SETUP.md) |
+| [src/ai/](src/ai/) | 会話AI（個別相談・商品検索・提案の下書き・再交渉） | [src/ai/README.md](src/ai/README.md) |
+| [supabase/migrations/](supabase/migrations/) | DBのテーブル・権限・処理（SQL） | [SETUP.md](SETUP.md) |
+| [Sample_db/](Sample_db/) | AI・画面・サーバーで共通のデータの型と、最初のDB設計 | [Sample_db/README.md](Sample_db/README.md) |
+| [demo/](demo/) | Google・Supabase なしで試せる手元専用デモ | [demo/README.md](demo/README.md) |
+| [docs/](docs/) | 画面の設計メモ | [docs/frontend-design.md](docs/frontend-design.md) |
+| [src/connection/](src/connection/)・[supabase/functions/](supabase/functions/) | 以前の構成の接続部品と Edge Function。今の構成では使わない（テストは残している） | — |
+
+### 担当ごとの工夫
+
+**フロントエンド**（[frontend/](frontend/)）
+- 親と子で同じ画面を出し分け、子どもにはやさしい言葉、親にはていねいな言葉で表示する
+- 個別相談・共有交渉のそれぞれで「誰に見えるか」を最初に表示する
+- 通信は自動で送り直さず、二重送信を防ぎ、画面で見ている提案の版を送る
+- AIの返事を含め、表示する文字はすべてエスケープしてから出す
+
+**バックエンド**（[src/server/](src/server/)・[supabase/migrations/](supabase/migrations/)）
+- 保護者は Google ログイン（PKCE）。Supabase のトークンはサーバーの外に出さず、アプリ独自のセッションを HttpOnly の Cookie で持つ
+- 変更の操作は Origin の確認と CSRF トークンで守る。招待の発行・端末の承認・接続解除の前には、Googleでの本人確認をやり直してもらう
+- ポイントの加算・購入・提案の送信と返事・AI処理の排他は、DBの関数（トランザクション）で行い、二重に起きないようにする
+- 商品画像は、サーバーが商品ページから取得して配信する。https だけ・公開アドレスだけ・サイズと時間の上限つきで取得する
+- 画面の配信には Content-Security-Policy を付け、リクエストの回数制限を入れている
+
+**AI**（詳しくは [src/ai/README.md](src/ai/README.md)）
+- 「個別相談」と「交渉」のモードをサーバーが指定し、交渉では本人の非公開の発言・履歴・プロフィールをAIに渡さない
+- Gemini と Google Search で実際の商品を探し、出典のURLを使う。裏付けのない価格は出さない
+- 予算オーバー・価格が分からない・条件に合うか分からないときは、提案の下書きを止める
+- Gemini には毎回 `store: false` で送り、AIの側に履歴を残さない
 
 ## 開発技術
+
 ### 活用した技術
+
 #### API・データ
-*
-* 
+* Gemini API（`gemini-3.5-flash-lite`、Google Search によるグラウンディング）
+* Supabase（PostgreSQL・Auth）
+* Google ログイン（OAuth）
 
 #### フレームワーク・ライブラリ・モジュール
-*
-* 
+* Node.js 24（標準の `http` サーバー）・TypeScript
+* `@google/genai`（Gemini の SDK）
+* `qrcode`（招待QRの作成）
+* PGlite（手元専用デモとテスト用のDB）・Supabase CLI
+* 画面は HTML / CSS / JavaScript（フレームワークなし）
 
 #### デバイス
-*
-* 
+* スマートフォン・PCのブラウザー
 
 ### 独自技術
+
 #### ハッカソンで開発した独自機能・技術
-* 独自で開発したものの内容をこちらに記載してください
-* 特に力を入れた部分をファイルリンク、またはcommit_idを記載してください。
+* 個別相談と共有交渉を分けた、親子の提案・交渉の流れ（[src/server/app.ts](src/server/app.ts)、[supabase/migrations/20261025010000_chat_phases.sql](supabase/migrations/20261025010000_chat_phases.sql)）
+* 見える範囲を守る会話AI（[src/ai/conversation.ts](src/ai/conversation.ts)、[src/ai/prompt.ts](src/ai/prompt.ts)）
+* QRと確認番号による親子の端末の接続（[src/server/app.ts](src/server/app.ts)、[supabase/migrations/20261024031810_invitation_security.sql](supabase/migrations/20261024031810_invitation_security.sql)）
+* 商品ページからの安全な画像取得（[src/server/preview.ts](src/server/preview.ts)）
+* 親子で出し分ける画面と、失敗に強い通信（[frontend/app.js](frontend/app.js)、[frontend/api.js](frontend/api.js)）
+
+## 動かし方
+
+Node.js 24 以上が必要です。
+
+```sh
+npm install
+npm start      # 通常版（http://localhost:3000）。先に SETUP.md の設定が必要
+npm run demo   # 手元専用デモ（http://localhost:3001/demo）。Google・Supabase の設定は不要
+npm test       # テスト（AIのAPIは呼ばない）
+npm run typecheck
+```
+
+設定の手順は [SETUP.md](SETUP.md)、デモの使い方は [demo/README.md](demo/README.md) を見てください。
