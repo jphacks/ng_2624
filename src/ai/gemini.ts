@@ -81,14 +81,19 @@ export async function generateGeminiReply(
     options: GeminiOptions = {},
 ): Promise<GenerationResult> {
     if (!apiKey?.trim()) throw new ConversationError('MISSING_API_KEY', 'GEMINI_API_KEYが設定されていません。');
+    request.signal?.throwIfAborted();
+    const timeoutMs = Math.min(request.timeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS);
     const ai = new GoogleGenAI({ apiKey });
     const result = await ai.interactions.create({
         model: (request.search ? options.searchModel || environment('GEMINI_SEARCH_MODEL') : undefined)
             || options.model || environment('GEMINI_MODEL') || CONVERSATION_MODEL,
         input: request.input, system_instruction: request.systemInstruction, store: false,
+        ...(request.maxOutputTokens ? { generation_config: { max_output_tokens: request.maxOutputTokens } } : {}),
         ...(request.search ? { tools: [{ type: 'google_search' as const }] } : {}),
         ...(request.schema ? { response_format: { type: 'text' as const, mime_type: 'application/json', schema: request.schema } } : {}),
-    }, { timeout_ms: REQUEST_TIMEOUT_MS, retries: { strategy: 'none' } });
+    }, { timeout_ms: timeoutMs, retries: { strategy: 'none' },
+        ...(request.signal ? { signal: AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]) } : {}),
+    });
     if (result.status !== 'completed') throw new ConversationError('API_ERROR', 'AIの処理が完了しませんでした。もう一度お試しください。');
     if (!result.output_text?.trim()) throw new ConversationError('EMPTY_RESPONSE', 'Geminiから返答がありませんでした。');
     return { text: result.output_text, ...(request.search ? readGrounding(result) : { search: null, evidence: {} }) };

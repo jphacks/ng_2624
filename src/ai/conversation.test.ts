@@ -10,6 +10,7 @@ import { generateGeminiReply, readGrounding } from './gemini.ts';
 import type { GenerationResult } from './gemini.ts';
 import type { ConversationRequest } from './prompt.ts';
 import { publicUrl } from './validation.ts';
+import { searchProducts, SEARCH_BUDGET_MS } from './search.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const NOW = '2026-10-23T20:00:00+09:00';
@@ -107,6 +108,50 @@ test('実商品検索は判断→検索→整形の順に進み、出典のURL�
     assert.deepEqual(requests.map(r => !!r.search), [false, true, false]);
     assert.equal(requests[1].input.includes('工作に取り組んでほしい'), false);
     assert.equal(requests[2].input.includes('history'), false);
+    assert.match(requests[1].systemInstruction, /各区分1件、合計最大3件/);
+    assert.match(requests[2].systemInstruction, /最大3件。大中小各1件/);
+    assert.equal((requests[2].schema?.properties as Record<string, { maxItems: number }>).products.maxItems, 3);
+    assert.deepEqual(requests.slice(1).map(r => r.timeoutMs), [20_000, 10_000]);
+    assert.deepEqual(requests.slice(1).map(r => r.maxOutputTokens), [4096, 4096]);
+});
+
+test('商品検索は共通の期限で通信を中断し、遅れて届いた結果から整形を始めない', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const requests: ConversationRequest[] = [];
+    let resolveSearch!: (value: GenerationResult) => void;
+    const result = searchProducts('工作キット', input(), async request => {
+        requests.push(request);
+        return new Promise<GenerationResult>(resolve => { resolveSearch = resolve; });
+    }, () => 'id');
+    const rejected = assert.rejects(result, hasCode('TIMEOUT'));
+    t.mock.timers.tick(SEARCH_BUDGET_MS);
+    await rejected;
+    assert.equal(requests[0].signal?.aborted, true);
+    resolveSearch(grounded());
+    await Promise.resolve();
+    assert.equal(requests.length, 1);
+});
+
+test('検索から整形へ進んでも30秒の期限を延長しない', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const requests: ConversationRequest[] = [];
+    let resolveSearch!: (value: GenerationResult) => void;
+    let enteredExtraction!: () => void;
+    const extractionStarted = new Promise<void>(resolve => { enteredExtraction = resolve; });
+    const result = searchProducts('工作キット', input(), async request => {
+        requests.push(request);
+        if (request.search) return new Promise<GenerationResult>(resolve => { resolveSearch = resolve; });
+        enteredExtraction();
+        return new Promise<GenerationResult>(() => {});
+    }, () => 'id');
+    const rejected = assert.rejects(result, hasCode('TIMEOUT'));
+    t.mock.timers.tick(20_000);
+    resolveSearch(grounded());
+    await extractionStarted;
+    assert.equal(requests.length, 2);
+    t.mock.timers.tick(10_000);
+    await rejected;
+    assert.equal(requests[1].signal?.aborted, true);
 });
 
 const rejectedCases: Array<[string, Record<string, unknown>, GenerationResult]> = [
@@ -296,9 +341,11 @@ test('従来の直接起動を維持し、キーなしなら安全なエラー�
 test('実SDKが固定指示・JSON Schema・検索ツール・store=falseを正しいAPI形式で送る', async () => {
     const original = globalThis.fetch;
     const bodies: Array<Record<string, unknown>> = [];
+    const signals: AbortSignal[] = [];
     globalThis.fetch = async (_url, init) => {
         const body = init?.body ?? (_url instanceof Request ? await _url.clone().text() : '');
         bodies.push(JSON.parse(String(body)) as Record<string, unknown>);
+        signals.push((_url instanceof Request ? _url.signal : init?.signal)!);
         return new Response(JSON.stringify({ id: 'sdk-test', status: 'completed',
             steps: [{ type: 'model_output', content: [{ type: 'text', text: '{"ok":true}' }] }],
         }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -310,9 +357,15 @@ test('実SDKが固定指示・JSON Schema・検索ツール・store=falseを正�
         assert.equal(bodies[0].system_instruction, '固定の指示');
         assert.deepEqual(bodies[0].response_format, { type: 'text', mime_type: 'application/json', schema: { type: 'object' } });
         assert.equal('tools' in bodies[0], false);
-        await generateGeminiReply({ systemInstruction: '検索指示', input: '{}', search: true }, 'fake-key-for-test');
+        const controller = new AbortController();
+        await generateGeminiReply({ systemInstruction: '検索指示', input: '{}', search: true,
+            maxOutputTokens: 4096, timeoutMs: 20_000, signal: controller.signal }, 'fake-key-for-test');
         assert.deepEqual(bodies[1].tools, [{ type: 'google_search' }]);
         assert.equal('response_format' in bodies[1], false);
+        assert.deepEqual(bodies[1].generation_config, { max_output_tokens: 4096 });
+        assert.equal('generation_config' in bodies[0], false);
+        controller.abort();
+        assert.equal(signals[1].aborted, true);
     } finally { globalThis.fetch = original; }
 });
 
