@@ -177,6 +177,18 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     const image = await fetchProductImage(product.productUrl, product.imageUrl);
     return { ...product, imageUrl: image ? `/api/products/${encodeURIComponent(product.id)}/image` : null };
   }
-  return { enrichProduct, fetchProductImage, resolveAmazonProductUrl };
+  async function prepareProduct(product: ProductCandidate): Promise<ProductCandidate | null> {
+    const productUrl = await resolveAmazonProductUrl(product.productUrl);
+    if (productUrl) return enrichProduct({ ...product, productUrl });
+    // 検索サービスの引用URLを解決できなくても、検索済み候補は残す。
+    // 未確認のAmazon URLは生成せず、引用された出典リンクをそのまま保持する。
+    try {
+      const source = httpsUrl(product.productUrl);
+      if (source.hostname !== 'vertexaisearch.cloud.google.com' || !source.pathname.startsWith('/grounding-api-redirect/')
+          || !product.sourceUrls.includes(product.productUrl)) return null;
+      return { ...product, imageUrl: null, recommendationReason: product.recommendationReason + ' 商品ページへの接続は未確認です。出典で確認してください。' };
+    } catch { return null; }
+  }
+  return { enrichProduct, fetchProductImage, resolveAmazonProductUrl, prepareProduct };
 }
-export const { enrichProduct, fetchProductImage, resolveAmazonProductUrl } = createProductPreview();
+export const { enrichProduct, fetchProductImage, resolveAmazonProductUrl, prepareProduct } = createProductPreview();

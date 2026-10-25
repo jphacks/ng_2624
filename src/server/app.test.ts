@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from './app.ts';
+import { createProductPreview } from './preview.ts';
 import { ConversationError } from '../ai/errors.ts';
 import { hash, seal, unseal, equal, createDB } from './core.ts';
 import type { Config } from './core.ts';
@@ -103,6 +104,20 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   assert.equal(fromChat.status,200);assert.equal(captured.searchQuery,undefined);
   assert.match(captured.message,/これまでの相談内容/);
   assert.ok(captured.history.some((m:any)=>m.sender==='user'&&m.content.includes('Switch スプラトゥーン')));
+ });
+ await t.test('ゲームの引用URLを解決できなくても3候補を保存しAPIから表示できる',async()=>{
+  const preview=createProductPreview({resolve:async()=>[{address:'93.184.216.34',family:4}],read:async()=>{throw Error('search source unavailable');}});
+  const searchApp=createApp(config,{db,ai:async input=>({requestId:input.requestId,action:'PRODUCT',reply:'ゲームの候補です',search:null,
+   products:([ 'small','medium','large' ] as const).map((size,i)=>({id:id(200+i),size,name:`ゲーム${i+1}`,priceJpy:null,priceCheckedAt:null,
+    productUrl:`https://vertexaisearch.cloud.google.com/grounding-api-redirect/game-${i}`,sourceUrls:[`https://vertexaisearch.cloud.google.com/grounding-api-redirect/game-${i}`],description:'検索で確認した候補',recommendationReason:'候補です'}))}),
+   enrich:preview.prepareProduct,image:async()=>null,qr:async()=>''});
+  const c=await call('/conversations','POST',{});
+  await call('/conversations/'+c.data.conversationId+'/start','POST',{});
+  const response=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'ゲーム'})}));
+  const payload=await response.json();assert.equal(response.status,200,JSON.stringify(payload));
+  assert.equal(payload.data.products.length,3);assert.equal(payload.data.latestAIOutput.action,'PRODUCT');
+  const saved=await call('/conversations/'+c.data.conversationId);assert.equal(saved.data.products.length,3);
+  assert.ok(saved.data.products.every((p:any)=>p.imageUrl===null&&p.recommendationReason.includes('接続は未確認')));
  });
  await t.test('pairing can restart with a new invitation in the same browser and cannot replace an authenticated parent',async()=>{
   const first=await call('/children/'+child+'/invitations','POST',{},'parent');assert.equal(first.status,201);

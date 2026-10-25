@@ -121,7 +121,7 @@ export function createApp(config: Config, dep: Dependencies) {
   async function enrichOutput(output: AIOutput): Promise<AIOutput> {
     if (output.action !== 'PRODUCT') return output;
     const products = (await Promise.all(output.products.map(dep.enrich))).filter((p): p is ProductCandidate => p !== null);
-    return products.length ? { ...output, products } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: '商品ページを確認できませんでした。検索条件を見直して、もう一度探してください。' };
+    return products.length ? { ...output, products } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: '検索結果の商品リンクを確認できませんでした。時間をおいて、もう一度お試しください。' };
   }
   async function runNegotiationAI(user: Row, id: string, message: string | null) {
     rate(`ai:${user.id}`,20,600000);
@@ -157,8 +157,7 @@ export function createApp(config: Config, dep: Dependencies) {
       if (pv && !products.some(x => x.id === pv.product.id)) products.push(pv.product);
       const child = await one('users', { id: eq(c.child_id || user.id) });
       const input: AIInput = { searchQuery, childContext: { age: age(child.birth_date), gradeLevel: childView(child).gradeLevel }, requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, expectations: [] } }, sharedConditions: [], constraints: configChild.constraints, rewardGuidelines: configChild.rewardGuidelines, products: products.map(p => ({ ...p, imageUrl: null })), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };
-      let output = await dep.ai(input);
-      if (output.action === 'PRODUCT') { const products = (await Promise.all(output.products.map(dep.enrich))).filter((p): p is ProductCandidate => p !== null); output = products.length ? { ...output, products } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: 'Amazonの商品ページを確認できませんでした。希望する商品や条件を少し変えて、もう一度探してみましょう。' }; }
+      const output = await enrichOutput(await dep.ai(input));
       const updated = await db.rpc('wb_finish_ai', { p_actor_id: user.id, p_conversation_id: c.id, p_lock_id: lockId, p_message: message, p_output: output });
       return chatView(user, updated);
     } catch (e) {
