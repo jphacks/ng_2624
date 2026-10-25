@@ -1430,3 +1430,10 @@ body:has(#content.chat-layout-v3) {
 /* Increase the version in index.html when publishing an app update. */
 .app-version{position:absolute;z-index:101;top:8px;right:8px;padding:4px 8px;border:1px solid #dcecf0;border-radius:8px;background:#fff;color:#54727e;font-size:11px;line-height:1.6;pointer-events:none}
 .demo-tools{right:52px}
+
+/* Keep the selected item compact while the conversation takes the available space. */
+.chat-selected-title { flex: 0 0 auto; padding: .55rem 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9rem; color: #456675; background: #eef8f3; border-radius: 1rem; }
+.reason-confirmation, .shared-context { padding: 1rem; margin: 1rem 0; border-radius: 1rem; background: #edf8f1; }
+.shared-context h2 { font-size: 1rem; margin-top: 0; }
+.selected-product-details { margin: .5rem 0; font-size: .9rem; }
+.selected-product-details summary { cursor: pointer; }

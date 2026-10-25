@@ -64,7 +64,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   assert.equal((await call('/conversations/'+conversation+'/start','POST',{})).status,200);
   const r=await call('/conversations/'+conversation+'/messages','POST',{message:'商品がほしい',role:'parent',history:[{content:'other'}]});assert.equal(r.status,200);assert.deepEqual(r.data.messages.map((x:any)=>x.sender),['user','assistant']);assert.equal(aiCalls,1);
   assert.equal((await call('/conversations/'+conversation+'/selected-product','PATCH',{selectedProductId:id(30)})).status,200);
-  mode='draft';const d=await call('/conversations/'+conversation+'/proposal-drafts','POST',{});assert.equal(d.status,200);proposal=d.data.currentProposal.id;
+  mode='draft';const d=await call('/conversations/'+conversation+'/proposal-drafts','POST',{});assert.equal(d.status,200);assert.equal(d.data.currentProposal,null);const confirmed=await call('/conversations/'+conversation+'/confirm-reason','POST',{reasonSummary:d.data.reasonSummary});assert.equal(confirmed.status,200,JSON.stringify(confirmed));proposal=confirmed.data.currentProposal.id;
   assert.equal((await call('/proposals/'+proposal,'GET',undefined,'parent')).status,404);
  });
  await t.test('only explicit proposal is sent, both parties agree, purchase debits once, earned total stays',async()=>{
@@ -140,12 +140,13 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   // Seed legacy metadata with no price or image, as saved by older deployments.
   await db.update('conversations',{id:'eq.'+cid},{products:candidates});
   for(const p of candidates)await db.insert('products',{id:p.id,name:p.name,price_jpy:null,price_checked_at:null,image_url:null,product_url:p.productUrl,size:p.size,source_urls:[]});
-  const restored=await request('/conversations/'+cid);assert.equal(restored.status,200);assert.equal(restored.data.products.length,3);
+  const initial=await request('/conversations/'+cid);assert.equal(initial.status,200);assert.equal(initial.data.products.length,3);
+  await new Promise(resolve=>setImmediate(resolve));const restored=await request('/conversations/'+cid);
   assert.equal(restored.data.products[0].priceJpy,4980);assert.match(restored.data.products[0].imageUrl,/recovered/);assert.equal(restored.data.products[1].priceJpy,null);
   const count=enrichCalls;await request('/conversations/'+cid);assert.equal(enrichCalls,count);
   assert.equal((await db.list('products',{id:'eq.'+id(230)}))[0].price_jpy,4980);
   assert.equal((await request('/conversations/'+cid+'/selected-product','PATCH',{selectedProductId:id(230)})).status,200);
-  const draft=await request('/conversations/'+cid+'/proposal-drafts','POST',{});assert.equal(draft.status,200,JSON.stringify(draft));assert.equal(draft.data.currentProposal.productId,id(230));
+  const draft=await request('/conversations/'+cid+'/proposal-drafts','POST',{});assert.equal(draft.status,200,JSON.stringify(draft));assert.equal(draft.data.currentProposal,null);const confirmed=await request('/conversations/'+cid+'/confirm-reason','POST',{reasonSummary:draft.data.reasonSummary});assert.equal(confirmed.data.currentProposal.productId,id(230));
  });
  await t.test('pairing can restart with a new invitation in the same browser and cannot replace an authenticated parent',async()=>{
   const first=await call('/children/'+child+'/invitations','POST',{},'parent');assert.equal(first.status,201);

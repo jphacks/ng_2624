@@ -289,7 +289,7 @@ for (const [label, value] of invalidInputs) {
     });
 }
 
-for (const text of ['not-json', '{}', decision({ action: 'AGREED' }).text, draft({ purchaseConditions: [] }).text]) {
+for (const text of ['not-json', '{}', decision({ action: 'AGREED' }).text]) {
     test(`不正なAI応答を公開出力にしない：${text.slice(0, 40)}`, async () => {
         await assert.rejects(createReply(input(), { generate: async () => ({ text, search: null, evidence: {} }) }), hasCode('INVALID_RESPONSE'));
     });
@@ -578,7 +578,7 @@ test('3件未満でも取得済み候補を提示し入力を変更しない', a
     const before = structuredClone(value);
     const found = await createReply(value, { generate: searchQueue([SEARCH(), grounded(), extraction()]) });
     assert.equal(found.action, 'PRODUCT');
-    assert.match(found.reply, /1件の候補/);
+    assert.match(found.reply, /1こ見つかったよ/);
     assert.deepEqual(value, before);
 });
 
@@ -924,4 +924,10 @@ test('Amazonの追加取得失敗でも先に取得した商品を返す',async(
         return new Response(amazonCard('B000000009','取得済みブロック',amazonPrice(1000)),{headers:{'Content-Type':'text/html'}});
     });
     assert.equal(result.candidates?.length,1);assert.equal(requests,2);
+});
+
+
+test('a reason summary needs no promise or purchase condition',async()=>{
+ const result=await createReply({...input(),mode:'consultation',negotiationHistory:[],sharedConditions:[],products:[product],selectedProductId:product.id}, {generate:async()=>draft({purchaseConditions:[]})});
+ assert.equal(result.action,'PROPOSAL');assert.deepEqual(result.proposalDraft?.purchaseConditions,[]);
 });

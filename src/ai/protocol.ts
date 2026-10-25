@@ -64,8 +64,7 @@ export function parseDecision(raw: string): Decision {
             constraintsSatisfied: item.constraintsSatisfied,
         };
         if (result.action === 'SEARCH' && !result.searchQuery) throw new Error('missing query');
-        if (result.action === 'PROPOSAL' && (!result.persuasionText || !result.purchaseConditions.length)) throw new Error('missing draft');
-        if (result.action === 'NEGOTIATION' && result.persuasionText && !result.purchaseConditions.length) throw new Error('missing conditions');
+        if (result.action === 'PROPOSAL' && !result.persuasionText) throw new Error('missing draft');
         return result;
     });
 }

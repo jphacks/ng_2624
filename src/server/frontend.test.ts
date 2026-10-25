@@ -13,12 +13,13 @@ async function frontend(request:(path:string,method?:string,body?:any)=>Promise<
  nodes['#content'].classList={add:(...names:string[])=>names.forEach(name=>classes.add(name)),remove:(...names:string[])=>names.forEach(name=>classes.delete(name)),contains:(name:string)=>classes.has(name)};
  const location={hash:'#home',search:'',pathname:'/'};
  const events:any={};const window:any={scrollX:0,scrollY:0,scrollTo(position:any){window.scrollX=position.left;window.scrollY=position.top;},addEventListener:(name:string,fn:any)=>{events[name]=fn;}};
- const context=vm.createContext({window,document:{querySelector:(id:string)=>nodes[id],addEventListener:(name:string,fn:any)=>{events[name]=fn;}},location,
+ const document:any={visibilityState:'visible',activeElement:null,querySelector:(id:string)=>nodes[id],addEventListener:(name:string,fn:any)=>{events[name]=fn;}};
+ const context=vm.createContext({window,document,location,
  history:{pushState:(_:unknown,__:string,hash:string)=>{location.hash=hash;},replaceState:(_:unknown,__:string,hash:string)=>{location.hash=hash;}},
  sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm});
- vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat,checkPairingRequests};})();'),context);
+ vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat,checkPairingRequests,refreshVisible};})();'),context);
  await new Promise(resolve=>setImmediate(resolve));
- return {...window.testing,nodes,events,location,window};
+ return {...window.testing,nodes,events,location,window,document};
 }
 const session={authenticated:true,user:{role:'parent',displayName:'保護者',onboardingCompleted:true}};
 const dashboard={childId:'child',children:[],goals:[],chores:[],choreRequests:[],proposals:[]};
@@ -116,7 +117,7 @@ test('a hearing response during proposal generation remains in chat even with an
  ui.state.chat=conversation;ui.location.hash='#conversation/chat';
  await ui.action('generate-proposal');
  assert.equal(ui.location.hash,'#conversation/chat');
- assert.match(ui.nodes['#notice'].textContent,/条件を確認/);
+ assert.equal(ui.nodes['#notice'].textContent,'');
 });
 
 test('child registration has no budget fields or reward guidelines in its request',async()=>{
@@ -300,7 +301,7 @@ test('settings refresh keeps content visible while waiting and restores scroll p
  });
  await ui.go('#settings');
  const before=ui.nodes['#content'].innerHTML;
- assert.match(before,/>更新<\/button>/);
+ assert.doesNotMatch(before,/>更新<\/button>/);
  assert.doesNotMatch(before,/申請を再確認する/);
  ui.window.scrollY=900;
  refresh=true;
@@ -467,27 +468,28 @@ test('selected product leads to discussion, draft review and one save-and-send a
  const calls:{path:string,method:string,body:any}[]=[];
  const product={id:'product',name:'図鑑',priceJpy:1000};
  let draft={id:'draft',productId:'product',status:'draft',version:1,persuasionText:'星を調べたい',purchaseConditions:['大切に使う']};
- const thread={conversationId:'chat',mode:'consultation',phase:'consultation',canMessage:true,messages:[{sender:'assistant',content:'ほしい理由を教えてね'}],products:[product],selectedProductId:'product',currentProposal:null as any};
+ const thread={conversationId:'chat',mode:'consultation',phase:'consultation',canMessage:true,messages:[{sender:'assistant',content:'ほしい理由を教えてね'}],products:[product],selectedProductId:'product',currentProposal:null as any,reasonSummary:'星を調べたい',reasonConfirmed:false};
  const ui=await frontend(async(path,method='GET',body)=>{
   calls.push({path,method,body});
   if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
   if(path==='/conversations/chat')return thread;
-  if(path==='/conversations/chat/proposal-drafts')return {...thread,currentProposal:draft};
+  if(path==='/conversations/chat/confirm-reason'){assert.equal(body.reasonSummary,'星を調べたい');return {...thread,currentProposal:draft,reasonConfirmed:true};}
   if(path==='/proposals/draft'&&method==='PATCH'){draft={...draft,...body,version:2};return {proposal:draft,product,canEdit:true};}
-  if(path==='/proposals/draft/send'){assert.equal(body.version,2);draft={...draft,status:'pending'};return {proposal:draft,product};}
+  if(path==='/proposals/draft/send'){assert.equal(body.version,1);draft={...draft,status:'pending'};return {proposal:draft,product};}
   if(path==='/proposals/draft')return {proposal:draft,product,canEdit:draft.status==='draft'};
   return basic(path);
  });
  await ui.go('#conversation/chat');
  assert.match(ui.nodes['#content'].innerHTML,/ほしい理由を教えてね/);
- assert.match(ui.nodes['#content'].innerHTML,/えらんだ しょうひん/);
- assert.match(ui.nodes['#content'].innerHTML,/別の商品を選び直す/);
- await ui.action('generate-proposal');
+ assert.match(ui.nodes['#content'].innerHTML,/chat-selected-title/);
+ assert.match(ui.nodes['#content'].innerHTML,/えらびなおす/);
+ await ui.action('confirm-reason');
  assert.equal(ui.location.hash,'#proposal/draft');
- assert.match(ui.nodes['#content'].innerHTML,/おうちの人に相談する/);
+ assert.match(ui.nodes['#content'].innerHTML,/おうちのひとに おくる/);
  assert.match(ui.nodes['#content'].innerHTML,/個別の会話は共有しません/);
- await ui.submit('edit-proposal','draft',{persuasionText:'星をもっと調べたい',purchaseConditions:'大切に使う'});
- assert.deepEqual(calls.filter(c=>c.method!=='GET').map(c=>c.method+' '+c.path),['POST /conversations/chat/proposal-drafts','PATCH /proposals/draft','POST /proposals/draft/send']);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/やくそく|data-form="edit-proposal"/);
+ await ui.action('send-proposal','draft');
+ assert.deepEqual(calls.filter(c=>c.method!=='GET').map(c=>c.method+' '+c.path),['POST /conversations/chat/confirm-reason','POST /proposals/draft/send']);
  assert.match(ui.nodes['#content'].innerHTML,/へんじまち/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="edit-proposal"/);
 });
@@ -612,4 +614,52 @@ test('商品カードは画像・商品名・円価格を表示し説明文を�
  assert.match(html,/ゲーム/);assert.match(html,/5,980円/);
  assert.match(html,/src="\/api\/products\/game-1\/image"/);
  assert.doesNotMatch(html,/不要な商品解説|不要な推薦文|product-reason|5,980 ポイント/);
+});
+
+
+test('automatic refresh avoids overlap, keeps text typed during the request, and stops while hidden',async()=>{
+ let refreshing=false,finish:any,reads=0;
+ const pending=new Promise(resolve=>{finish=resolve;});
+ const ui=await frontend(async path=>{if(path.startsWith('/dashboard')){reads++;return refreshing?pending:dashboard;}return {...session,user:{...session.user,role:'child'}};});
+ const form={dataset:{form:'message',id:''}};
+ let field:any={name:'message',value:'かきかけ',closest:()=>form,focus(){ui.document.activeElement=this;},selectionStart:2,selectionEnd:2,setSelectionRange(a:number,b:number){this.selectionStart=a;this.selectionEnd=b;}};
+ const content=ui.nodes['#content'];let html=content.innerHTML;
+ Object.defineProperty(content,'innerHTML',{get:()=>html,set:(next:string)=>{html=next;field={...field,value:''};}});
+ content.querySelectorAll=(selector:string)=>selector==='input,textarea,select'?[field]:[];
+ ui.document.activeElement=field;refreshing=true;
+ const updating=ui.refreshVisible();await new Promise(resolve=>setImmediate(resolve));
+ const count=reads;await ui.refreshVisible();assert.equal(reads,count);
+ field.value='通信中にも かきつづけた';field.selectionStart=5;field.selectionEnd=5;
+ finish({...dashboard,balanceYen:123});await updating;
+ assert.equal(field.value,'通信中にも かきつづけた');assert.equal(field.selectionStart,5);assert.equal(ui.document.activeElement,field);
+ assert.match(content.innerHTML,/123/);
+ ui.document.visibilityState='hidden';await ui.refreshVisible();assert.equal(reads,count);
+});
+
+test('cached tab appears immediately and background refresh does not replace a newer destination',async()=>{
+ let slow=false,finish:any;const pending=new Promise(resolve=>{finish=resolve;});
+ const ui=await frontend(async path=>{if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};if(path.startsWith('/dashboard'))return slow?pending:dashboard;return basic(path);});
+ await ui.go('#chores');slow=true;
+ const returning=ui.go('#home');
+ assert.match(ui.nodes['#content'].innerHTML,/ありがとうポイント/);
+ await ui.go('#settings');finish({...dashboard,balanceYen:999});await returning;
+ assert.match(ui.nodes['#content'].innerHTML,/じぶんの設定/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/999/);
+});
+
+test('registration proceeds to device invitation and removed preferences are not submitted',async()=>{
+ const writes:any[]=[];
+ const ui=await frontend(async(path,method='GET',body)=>{if(method!=='GET')writes.push({path,body});if(path==='/children'&&method==='POST')return {childId:'new'};if(path==='/children/new/invitations')return {childId:'new',invitationToken:'ABCDEFGH2345',expiresAt:new Date().toISOString()};return basic(path);});
+ await ui.submit('create-child','',{displayName:'こども',birthDate:'2018-01-01',gender:'',gradeLevel:'2'});
+ assert.equal(ui.location.hash,'#invitation/new');assert.match(ui.nodes['#content'].innerHTML,/ABCDEFGH2345/);
+ assert.equal(Object.hasOwn(writes[0].body,'chorePreferences'),false);
+});
+
+
+test('automatic refresh defers DOM replacement during Japanese composition',async()=>{
+ let slow=false,finish:any;const pending=new Promise(resolve=>{finish=resolve;});
+ const ui=await frontend(async path=>{if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};if(path.startsWith('/dashboard'))return slow?pending:dashboard;return basic(path);});
+ slow=true;const before=ui.nodes['#content'].innerHTML,updating=ui.refreshVisible();
+ await new Promise(resolve=>setImmediate(resolve));ui.events.compositionstart();finish({...dashboard,balanceYen:654});await updating;
+ assert.equal(ui.nodes['#content'].innerHTML,before);
+ ui.events.compositionend();await ui.refreshVisible();assert.match(ui.nodes['#content'].innerHTML,/654/);
 });

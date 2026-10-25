@@ -8,7 +8,7 @@
   let res,payload;
   for(let attempt=0;;attempt++){
    const retry=method==='GET'&&attempt<2;
-   try { res=await fetch('/api'+path,{method,headers,credentials:'same-origin',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(150000),...(body===undefined?{}:{body:JSON.stringify(body)})}); }
+   try { res=await fetch('/api'+path,{method,headers,credentials:'same-origin',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(method==='GET'?15000:150000),...(body===undefined?{}:{body:JSON.stringify(body)})}); }
    catch {
     if(retry){await new Promise(resolve=>setTimeout(resolve,(attempt+1)*1000));continue;}
     throw new Error('通信結果を確認できません。最新の状態を読み込み、保存結果を確認してください。保存操作は自動では再送しません。');
