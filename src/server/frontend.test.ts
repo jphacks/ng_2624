@@ -295,8 +295,8 @@ test('settings refresh keeps content visible while waiting and restores scroll p
  const pending=new Promise(resolve=>{finish=resolve;});
  const ui=await frontend(async path=>{
   if(path==='/profile')return {displayName:'親'};
-  if(path==='/devices')return {devices:[]};
-  if(path==='/pairing/requests')return refresh?pending:{requests:[]};
+  if(path==='/devices')return refresh?pending:{devices:[]};
+  if(path==='/pairing/requests')return {requests:[]};
   return basic(path);
  });
  await ui.go('#settings');
@@ -310,9 +310,9 @@ test('settings refresh keeps content visible while waiting and restores scroll p
  assert.equal(ui.window.scrollY,900);
  // Content replacement may move the browser viewport; refresh restores it.
  ui.window.scrollY=0;
- finish({requests:[{childDisplayName:'更新後の申請',status:'approved'}]});
+ finish({devices:[{deviceLabel:'更新後の端末',lastActiveAt:null}]});
  await updating;
- assert.match(ui.nodes['#content'].innerHTML,/更新後の申請/);
+ assert.match(ui.nodes['#content'].innerHTML,/更新後の端末/);
  assert.equal(ui.window.scrollY,900);
  assert.equal(ui.location.hash,'#settings');
 });
@@ -322,14 +322,14 @@ test('a delayed refresh cannot restore scroll after leaving the screen',async()=
  const pending=new Promise(resolve=>{finish=resolve;});
  const ui=await frontend(async path=>{
   if(path==='/profile')return {displayName:'親'};
-  if(path==='/devices')return {devices:[]};
-  if(path==='/pairing/requests')return refresh?pending:{requests:[]};
+  if(path==='/devices')return refresh?pending:{devices:[]};
+  if(path==='/pairing/requests')return {requests:[]};
   return basic(path);
  });
  await ui.go('#settings');ui.window.scrollY=900;refresh=true;
  const updating=ui.action('reload');
  await ui.go('#home');ui.window.scrollY=100;
- finish({requests:[]});await updating;
+ finish({devices:[]});await updating;
  assert.equal(ui.window.scrollY,100);
  assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
 });
@@ -677,4 +677,14 @@ test('history clear is at the bottom of parent settings, confirms once and sends
  accepts=true;await ui.action('clear-history');assert.equal(confirmations,2);assert.equal(writes.length,1);assert.equal(writes[0].path,'/history');assert.equal(writes[0].method,'DELETE');assert.equal(writes[0].body.confirmation,'DELETE_ALL_HISTORY');assert.equal(ui.state.chat,null);assert.match(ui.nodes['#notice'].textContent,/消去しました/);
  ui.state.session={...session,user:{...session.user,role:'child'}};await ui.go('#settings');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/clear-history/);
  await assert.rejects(ui.action('clear-history'),/保護者/);
+});
+
+
+test('pairing uses automatic dialog without a duplicate settings section or manual invitation link',async()=>{
+ let pending=false;const ui=await frontend(async path=>{if(path==='/profile')return {displayName:'親'};if(path==='/devices')return {devices:[]};if(path==='/pairing/requests')return {requests:pending?[pairingRequest]:[]};if(path==='/children/child/invitations')return {childId:'child',invitationToken:'ABCDEFGH2345'};return basic(path);});
+ await ui.go('#settings');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/子どもの端末の接続申請|接続申請はありません|data-form="pair-respond"/);
+ assert.match(ui.nodes['#content'].innerHTML,/接続中の端末/);assert.match(ui.nodes['#content'].innerHTML,/履歴の全消去/);
+ await ui.action('invite','child');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/接続申請を確認する/);assert.match(ui.nodes['#content'].innerHTML,/画面が自動で開きます/);
+ pending=true;await ui.checkPairingRequests();assert.equal(ui.nodes['#pairing-dialog'].open,true);assert.match(ui.nodes['#pairing-dialog'].innerHTML,/6桁の確認番号/);
+ await ui.go('#children');assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
 });
