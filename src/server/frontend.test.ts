@@ -677,7 +677,10 @@ test('history clear is at the bottom of parent settings, confirms once and sends
  await ui.go('#settings');const html=ui.nodes['#content'].innerHTML;
  assert(html.indexOf('履歴の全消去')>html.indexOf('接続中の端末'));
  ui.state.chat={conversationId:'old'};await ui.action('clear-history');assert.equal(writes.length,0);assert.equal(confirmations,1);assert.equal(ui.state.chat.conversationId,'old');
- accepts=true;await ui.action('clear-history');assert.equal(confirmations,2);assert.equal(writes.length,1);assert.equal(writes[0].path,'/history');assert.equal(writes[0].method,'DELETE');assert.equal(writes[0].body.confirmation,'DELETE_ALL_HISTORY');assert.equal(ui.state.chat,null);assert.match(ui.nodes['#notice'].textContent,/消去しました/);
+ let statusVisible=false;ui.nodes['#history-clear-status']={scrollIntoView(){statusVisible=true;}};
+ accepts=true;await ui.action('clear-history');assert.equal(confirmations,2);assert.equal(writes.length,1);assert.equal(writes[0].path,'/history');assert.equal(writes[0].method,'DELETE');assert.equal(writes[0].body.confirmation,'DELETE_ALL_HISTORY');assert.equal(ui.state.chat,null);assert.equal(ui.nodes['#notice'].textContent,'');assert.equal(statusVisible,true);
+ assert.match(ui.nodes['#content'].innerHTML,/data-action="clear-history"[^]*?<p id="history-clear-status"[^>]*>履歴をすべて消去しました。ポイントは0に戻りました。<\/p><\/section>/);
+ await ui.refreshVisible();assert.match(ui.nodes['#content'].innerHTML,/履歴をすべて消去しました/);
  ui.state.session={...session,user:{...session.user,role:'child'}};await ui.go('#settings');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/clear-history/);
  await assert.rejects(ui.action('clear-history'),/保護者/);
 });
