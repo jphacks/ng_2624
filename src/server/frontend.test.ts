@@ -5,16 +5,18 @@ import { readFile } from 'node:fs/promises';
 
 // Execute the shipped script with a small DOM boundary. No application-only test hooks.
 const source=await readFile(new URL('../../frontend/app.js',import.meta.url),'utf8');
-async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>){
- const nodes:any=Object.fromEntries(['#content','#notice','#navigation'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
+async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>,confirm=(_message:string)=>true){
+ const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools','#role-label'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
+ const classes=new Set<string>();
+ nodes['#content'].classList={add:(...names:string[])=>names.forEach(name=>classes.add(name)),remove:(...names:string[])=>names.forEach(name=>classes.delete(name)),contains:(name:string)=>classes.has(name)};
  const location={hash:'#home',search:'',pathname:'/'};
- const events:any={};const window:any={addEventListener:(name:string,fn:any)=>{events[name]=fn;}};
+ const events:any={};const window:any={scrollX:0,scrollY:0,scrollTo(position:any){window.scrollX=position.left;window.scrollY=position.top;},addEventListener:(name:string,fn:any)=>{events[name]=fn;}};
  const context=vm.createContext({window,document:{querySelector:(id:string)=>nodes[id],addEventListener:(name:string,fn:any)=>{events[name]=fn;}},location,
  history:{pushState:(_:unknown,__:string,hash:string)=>{location.hash=hash;},replaceState:(_:unknown,__:string,hash:string)=>{location.hash=hash;}},
- sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm:()=>true});
+ sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm});
  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat};})();'),context);
  await new Promise(resolve=>setImmediate(resolve));
- return {...window.testing,nodes,events,location};
+ return {...window.testing,nodes,events,location,window};
 }
 const session={authenticated:true,user:{role:'parent',displayName:'保護者',onboardingCompleted:true}};
 const dashboard={childId:'child',children:[],goals:[],chores:[],choreRequests:[],proposals:[]};
@@ -113,7 +115,7 @@ test('logout is available only in parent settings and child actions cannot call 
  const ui=await frontend(async(path,method)=>{
   if(method==='POST')sent.push(path);
   if(path==='/profile')return {displayName:'子',profile:{preferences:{}}};
-  if(path==='/devices')return {devices:[]};
+  if(path==='/devices')return {devices:[{deviceSessionId:'current',deviceLabel:'保護者の端末',isCurrent:true}]};
   if(path==='/pairing/requests')return {requests:[]};
   return path==='/auth/session'?{...session,user:{...session.user,role:'child'}}:basic(path);
  });
@@ -126,4 +128,209 @@ test('logout is available only in parent settings and child actions cannot call 
  ui.state.session=session;await ui.go('#settings');
  assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/ログアウト/);
  assert.match(ui.nodes['#content'].innerHTML,/data-action="logout"/);
+});
+
+test('parent entry stays in the child list and child details have their own route',async()=>{
+ const calls:string[]=[];
+ const ui=await frontend(async path=>{
+  calls.push(path);
+  if(path==='/children')return {children:[{childId:'child',displayName:'りょ子'}]};
+  if(path.startsWith('/dashboard'))return {...dashboard,children:[{childId:'child',displayName:'りょ子'}]};
+  return basic(path);
+ });
+ assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
+ assert.match(ui.nodes['#content'].innerHTML,/目標・お手伝いを確認/);
+ assert.match(ui.nodes['#navigation'].innerHTML,/>ホーム</);
+ assert.ok(!calls.some(path=>path.startsWith('/dashboard')));
+ await ui.action('child-home','child');
+ assert.equal(ui.location.hash,'#child-home/child');
+ assert.match(ui.nodes['#content'].innerHTML,/りょ子の目標・お手伝い/);
+ assert.equal(calls.at(-1),'/dashboard?childId=child');
+ await ui.go('#home');
+ assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
+ await ui.go('#child-home/child');
+ assert.match(ui.nodes['#content'].innerHTML,/りょ子の目標・お手伝い/);
+});
+
+test('child home still opens the child dashboard',async()=>{
+ const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role:'child',displayName:'りょ子'}}:basic(path));
+ assert.match(ui.nodes['#content'].innerHTML,/りょ子、おかえり！/);
+ assert.match(ui.nodes['#navigation'].innerHTML,/>ホーム</);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/子ども一覧/);
+});
+
+
+test('demo tools do not change navigation or welcome layout',async()=>{
+ for(const authenticated of [true,false]){
+  const regularSession=authenticated?session:{authenticated:false};
+  const regular=await frontend(async path=>path==='/auth/session'?regularSession:basic(path));
+  const demo=await frontend(async path=>path==='/auth/session'?{...regularSession,demo:true}:basic(path));
+  assert.equal(demo.nodes['#navigation'].innerHTML,regular.nodes['#navigation'].innerHTML);
+  assert.equal(demo.nodes['#content'].innerHTML,regular.nodes['#content'].innerHTML);
+  assert.equal(demo.nodes['#demo-tools'].hidden,false);
+  assert.equal(regular.nodes['#demo-tools'].hidden,true);
+  assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/デモ操作/);
+ }
+});
+
+
+test('current device uses logout while other connections use revocation',async()=>{
+ const sent:string[]=[];
+ const confirmations:string[]=[];let accepted=false;
+ let devices=[{deviceSessionId:'current',deviceLabel:'保護者の端末',isCurrent:true},{deviceSessionId:'other',deviceLabel:'子どもの端末',isCurrent:false}];
+ const ui=await frontend(async(path,method)=>{
+  if(method==='POST'||method==='DELETE')sent.push(method+' '+path);
+  if(path==='/devices/other'&&method==='DELETE'){devices=devices.filter(d=>d.deviceSessionId!=='other');return {currentDeviceRevoked:false};}
+  if(path==='/profile')return {displayName:'親'};
+  if(path==='/devices')return {devices};
+  if(path==='/pairing/requests')return {requests:[]};
+  return basic(path);
+ },message=>{confirmations.push(message);return accepted;});
+ await ui.go('#settings');
+ const html=ui.nodes['#content'].innerHTML;
+ assert.match(html,/この端末からログアウト/);
+ assert.doesNotMatch(html,/data-action="revoke-device" data-id="current"|Googleで本人確認する/);
+ await ui.run(()=>ui.action('revoke-device','other'));
+ assert.deepEqual(sent,[]);
+ assert.match(ui.nodes['#content'].innerHTML,/data-id="other"/);
+ assert.match(confirmations[0],/接続を解除しますか/);
+ accepted=true;
+ await ui.run(()=>ui.action('revoke-device','other'));
+ assert.match(ui.nodes['#notice'].textContent,/接続を解除しました/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-id="other"/);
+ await ui.run(()=>ui.action('logout'));
+ assert.deepEqual(sent,['DELETE /devices/other','POST /auth/logout']);
+ assert.equal(ui.state.session.authenticated,false);
+ assert.equal(ui.nodes['#navigation'].hidden,true);
+ assert.match(ui.nodes['#content'].innerHTML,/Googleで保護者ログイン/);
+});
+
+test('failed device revocation shows the reason and brings it into view',async()=>{
+ const ui=await frontend(basic);
+ let scrolled=false;ui.nodes['#notice'].scrollIntoView=()=>{scrolled=true;};
+ await ui.run(async()=>{throw Object.assign(new Error('安全のためGoogleで本人確認をしてください。'),{code:'REAUTH_REQUIRED',status:403});});
+ assert.match(ui.nodes['#notice'].textContent,/Googleで本人確認/);
+ assert.equal(scrolled,true);
+ assert.equal(ui.state.session.authenticated,true);
+});
+
+
+test('settings refresh keeps content visible while waiting and restores scroll position',async()=>{
+ let refresh=false,finish:any;
+ const pending=new Promise(resolve=>{finish=resolve;});
+ const ui=await frontend(async path=>{
+  if(path==='/profile')return {displayName:'親'};
+  if(path==='/devices')return {devices:[]};
+  if(path==='/pairing/requests')return refresh?pending:{requests:[]};
+  return basic(path);
+ });
+ await ui.go('#settings');
+ const before=ui.nodes['#content'].innerHTML;
+ assert.match(before,/>更新<\/button>/);
+ assert.doesNotMatch(before,/申請を再確認する/);
+ ui.window.scrollY=900;
+ refresh=true;
+ const updating=ui.action('reload');
+ assert.equal(ui.nodes['#content'].innerHTML,before);
+ assert.equal(ui.window.scrollY,900);
+ // Content replacement may move the browser viewport; refresh restores it.
+ ui.window.scrollY=0;
+ finish({requests:[{childDisplayName:'更新後の申請',status:'approved'}]});
+ await updating;
+ assert.match(ui.nodes['#content'].innerHTML,/更新後の申請/);
+ assert.equal(ui.window.scrollY,900);
+ assert.equal(ui.location.hash,'#settings');
+});
+
+test('a delayed refresh cannot restore scroll after leaving the screen',async()=>{
+ let refresh=false,finish:any;
+ const pending=new Promise(resolve=>{finish=resolve;});
+ const ui=await frontend(async path=>{
+  if(path==='/profile')return {displayName:'親'};
+  if(path==='/devices')return {devices:[]};
+  if(path==='/pairing/requests')return refresh?pending:{requests:[]};
+  return basic(path);
+ });
+ await ui.go('#settings');ui.window.scrollY=900;refresh=true;
+ const updating=ui.action('reload');
+ await ui.go('#home');ui.window.scrollY=100;
+ finish({requests:[]});await updating;
+ assert.equal(ui.window.scrollY,100);
+ assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
+});
+
+
+test('small screen label follows the signed-in role, including child details and logout',async()=>{
+ const ui=await frontend(basic);
+ assert.equal(ui.nodes['#role-label'].textContent,'保護者の画面');
+ assert.equal(ui.nodes['#role-label'].hidden,false);
+ await ui.action('child-home','child');
+ assert.equal(ui.nodes['#role-label'].textContent,'保護者の画面');
+ ui.state.session={...session,user:{...session.user,role:'child'}};
+ await ui.go('#home');
+ assert.equal(ui.nodes['#role-label'].textContent,'子どもの画面');
+ assert.equal(ui.nodes['#role-label'].hidden,false);
+ ui.state.session={authenticated:false};await ui.go('#home');
+ assert.equal(ui.nodes['#role-label'].hidden,true);
+ assert.equal(ui.nodes['#role-label'].textContent,'');
+});
+
+test('unified chat retains child, personal and shared thread switching without starting on entry',async()=>{
+ const calls:string[]=[];
+ const thread={conversationId:'latest',mode:'consultation',phase:'not_started',canMessage:false,messages:[],products:[]};
+ const ui=await frontend(async(path,method)=>{
+  calls.push((method||'GET')+' '+path);
+  if(path==='/children')return {children:[{childId:'child',displayName:'一人目'},{childId:'other',displayName:'二人目'}]};
+  if(path.startsWith('/conversations?'))return {conversations:[{conversationId:'old',updatedAt:'2026-10-24'},{conversationId:'latest',updatedAt:'2026-10-25'}]};
+  if(path==='/negotiations')return {negotiations:[{negotiationId:'shared',childId:'child'},{negotiationId:'other-shared',childId:'other'}]};
+  if(path==='/negotiations/shared')return {...thread,mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true};
+  if(path==='/conversations/latest/start')return {...thread,phase:'consultation',canMessage:true};
+  if(path.startsWith('/conversations/'))return {...thread,conversationId:path.split('/')[2]};
+  return basic(path);
+ });
+ await ui.go('#conversations');
+ const html=ui.nodes['#content'].innerHTML;
+ assert.equal(ui.state.chat.conversationId,'latest');
+ assert.match(html,/id="child-selector"/);assert.match(html,/一人目/);assert.match(html,/二人目/);
+ assert.match(html,/data-action="new-chat"/);assert.match(html,/data-id="old"/);assert.match(html,/data-id="shared"/);
+ assert.doesNotMatch(html,/data-id="other-shared"|data-form="message"/);
+ assert.ok(!calls.some(call=>call.startsWith('POST ')));
+ assert.equal(ui.nodes['#content'].classList.contains('chat-layout-v3'),true);
+ await ui.action('start-chat');assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
+ await ui.action('open-chat','old');assert.equal(ui.location.hash,'#conversation/old');
+ await ui.action('open-negotiation','shared');assert.equal(ui.location.hash,'#negotiation/shared');
+ assert.match(ui.nodes['#content'].innerHTML,/親子に公開するメッセージ/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="search-product-now"/);
+ ui.events.change({target:{id:'child-selector',value:'other'}});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(ui.location.hash,'#conversations');
+ assert.equal(ui.state.childId,'other');
+ assert.ok(calls.includes('GET /conversations?childId=other'));
+ assert.match(ui.nodes['#content'].innerHTML,/data-id="other-shared"/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-id="shared"/);
+ await ui.go('#home');assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
+ assert.equal(ui.nodes['#content'].classList.contains('chat-layout-v3'),false);
+});
+
+test('new unified chat uses existing create, start and product search endpoints',async()=>{
+ const posts:{path:string,body:any}[]=[];
+ let thread={conversationId:'new',mode:'consultation',phase:'not_started',canMessage:false,messages:[],products:[]};
+ const ui=await frontend(async(path,method,body)=>{
+  if(method==='POST')posts.push({path,body});
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path==='/conversations'&&method!=='POST')return {conversations:[]};
+  if(path==='/negotiations')return {negotiations:[]};
+  if(path==='/conversations')return {conversationId:'new'};
+  if(path==='/conversations/new/start')thread={...thread,phase:'consultation',canMessage:true};
+  if(path.startsWith('/conversations/new'))return thread;
+  return basic(path);
+ });
+ await ui.go('#conversations');
+ assert.equal(JSON.stringify(posts),JSON.stringify([{path:'/conversations',body:{}}]));
+ assert.match(ui.nodes['#content'].innerHTML,/個別相談を開始する/);
+ await ui.action('start-chat');await ui.action('search-product-now');
+ assert.equal(posts.at(-1)?.path,'/conversations/new/search');
+ assert.match(posts.at(-1)?.body.query,/これまでのチャット/);
+ assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="search-products"/);
 });

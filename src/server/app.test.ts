@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from './app.ts';
+import { ConversationError } from '../ai/errors.ts';
 import { hash, seal, unseal, equal, createDB } from './core.ts';
 import type { Config } from './core.ts';
 import { parseAIInput } from '../ai/validation.ts';
@@ -36,6 +37,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  async function call(path:string,method='GET',body?:unknown,role='child',csrf='csrf',origin=config.origin){const tok=role==='parent'?tokenParent:role==='stranger'?tokenStranger:tokenChild;const r=await app(new Request(config.origin+'/api'+path,{method,headers:{cookie:'wb_local_session='+tok,origin,'x-csrf-token':csrf,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}));return {status:r.status,...await r.json()};}
  await t.test('CSRF, role and family gates run before protected mutations',async()=>{
   assert.equal((await call('/auth/logout','POST',{})).status,403);
+  assert.equal((await call('/devices/'+hash(tokenParent),'DELETE')).status,403);
   assert.equal((await call('/auth/session')).data.authenticated,true);
   assert.equal((await call('/profile','PATCH',{displayName:'bad'},'parent','wrong')).status,403);
   assert.equal((await call('/profile','PATCH',{displayName:'bad'},'parent','csrf','https://evil.example')).status,403);
@@ -113,7 +115,37 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   const blocked=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(blocked.status,409);assert.equal(blocked.error.code,'ALREADY_AUTHENTICATED');
   jar=ownJar;const complete=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(complete.status,200);assert.equal(complete.data.user.role,'child');
  });
- await t.test('parent can log out from settings',async()=>{
+ await t.test('AI quota and timeout errors survive HTTP translation without exposing upstream details',async()=>{
+  const c=await call('/conversations','POST',{childId:child},'parent');assert.equal(c.status,201);const cid=c.data.conversationId;
+  assert.equal((await call('/conversations/'+cid+'/start','POST',{},'parent')).status,200);
+  for(const [failure,status,code,expected] of [
+   [new ConversationError('RATE_LIMIT','sensitive-upstream-details'),429,'RATE_LIMITED',/利用上限/],
+   [new ConversationError('TIMEOUT','sensitive-upstream-details'),502,'AI_UNAVAILABLE',/時間内/],
+   [new Error('sensitive-upstream-details'),502,'AI_UNAVAILABLE',/返答を取得できません/],
+  ] as const){
+   const failing=createApp(config,{db,ai:async()=>{throw failure;},enrich:async p=>p,image:async()=>null,qr:async()=>''});
+   const response=await failing(new Request(config.origin+'/api/conversations/'+cid+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'工作キット'})}));
+   const payload=await response.json();
+   assert.equal(response.status,status);assert.equal(payload.error.code,code);assert.match(payload.error.message,expected);
+   assert.ok(!JSON.stringify(payload).includes('sensitive-upstream-details'));
+   if(status===429)assert.equal(response.headers.get('Retry-After'),'60');
+   const stored=(await db.list('conversations',{id:'eq.'+cid}))[0];assert.equal(stored.ai_lock_id,null);
+  }
+ });
+ await t.test('device revocation needs parent, family and CSRF checks but no recent reauthentication',async()=>{
+  await db.update('app_sessions',{token_hash:'eq.'+hash(tokenParent)},{reauthenticated_at:new Date(Date.now()-11*60000).toISOString()});
+  const target=(await db.list('app_sessions',{user_id:'eq.'+child,revoked_at:'is.null'}))[0];
+  assert.ok(target);
+  const path='/devices/'+target.token_hash;
+  assert.equal((await call(path,'DELETE',undefined,'stranger')).status,403);
+  assert.equal((await call(path,'DELETE',undefined,'parent','wrong')).status,403);
+  assert.equal((await db.list('app_sessions',{token_hash:'eq.'+target.token_hash}))[0].revoked_at,null);
+  const revoked=await call(path,'DELETE',undefined,'parent');
+  assert.equal(revoked.status,200);assert.equal(revoked.data.revoked,true);assert.equal(revoked.data.currentDeviceRevoked,false);
+  assert.ok((await db.list('app_sessions',{token_hash:'eq.'+target.token_hash}))[0].revoked_at);
+ });
+ await t.test('parent can log out without reauthentication',async()=>{
+  await db.update('app_sessions',{token_hash:'eq.'+hash(tokenParent)},{reauthenticated_at:null});
   const loggedOut=await call('/auth/logout','POST',{},'parent');
   assert.equal(loggedOut.status,200);assert.equal(loggedOut.data.loggedOut,true);
   assert.equal((await call('/auth/session','GET',undefined,'parent')).data.authenticated,false);
