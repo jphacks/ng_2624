@@ -127,6 +127,26 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   const saved=await call('/conversations/'+c.data.conversationId);assert.equal(saved.data.products.length,3);
   assert.ok(saved.data.products.every((p:any)=>p.imageUrl===null&&p.recommendationReason.includes('接続は未確認')));
  });
+ await t.test('saved candidates recover verified prices and images before proposal generation; failed candidates remain',async()=>{
+  const candidates=Array.from({length:3},(_,i)=>({id:id(230+i),name:`復元商品${i}`,priceJpy:null,priceCheckedAt:null,imageUrl:null,size:'small' as const,productUrl:`https://www.amazon.co.jp/dp/B00000023${i}`,description:'',recommendationReason:'',sourceUrls:[]}));
+  const c=await call('/conversations','POST',{}),cid=c.data.conversationId;
+  await call('/conversations/'+cid+'/start','POST',{});
+  let enrichCalls=0;
+  const recoveryApp=createApp(config,{db,ai:async input=>{
+   if(input.selectedProductId){assert.equal(input.products.find(p=>p.id===id(230))?.priceJpy,4980);return {requestId:input.requestId,action:'PROPOSAL',reply:'下書きです',search:null,proposalDraft:{productId:id(230),target:'parent',persuasionText:'大切に使います',purchaseConditions:[],basedOn:null}};}
+   return {requestId:input.requestId,action:'PRODUCT',reply:'候補です',search:null,products:candidates};
+  },enrich:async p=>{enrichCalls++;if(p.id!==id(230))throw Error('unavailable');return {...p,priceJpy:4980,priceCheckedAt:new Date().toISOString(),imageUrl:'https://m.media-amazon.com/images/I/recovered.jpg'};},image:async()=>null,qr:async()=>''});
+  async function request(path:string,method='GET',body?:unknown){const response=await recoveryApp(new Request(config.origin+'/api'+path,{method,headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}));return {status:response.status,...await response.json()};}
+  // Seed legacy metadata with no price or image, as saved by older deployments.
+  await db.update('conversations',{id:'eq.'+cid},{products:candidates});
+  for(const p of candidates)await db.insert('products',{id:p.id,name:p.name,price_jpy:null,price_checked_at:null,image_url:null,product_url:p.productUrl,size:p.size,source_urls:[]});
+  const restored=await request('/conversations/'+cid);assert.equal(restored.status,200);assert.equal(restored.data.products.length,3);
+  assert.equal(restored.data.products[0].priceJpy,4980);assert.match(restored.data.products[0].imageUrl,/recovered/);assert.equal(restored.data.products[1].priceJpy,null);
+  const count=enrichCalls;await request('/conversations/'+cid);assert.equal(enrichCalls,count);
+  assert.equal((await db.list('products',{id:'eq.'+id(230)}))[0].price_jpy,4980);
+  assert.equal((await request('/conversations/'+cid+'/selected-product','PATCH',{selectedProductId:id(230)})).status,200);
+  const draft=await request('/conversations/'+cid+'/proposal-drafts','POST',{});assert.equal(draft.status,200,JSON.stringify(draft));assert.equal(draft.data.currentProposal.productId,id(230));
+ });
  await t.test('pairing can restart with a new invitation in the same browser and cannot replace an authenticated parent',async()=>{
   const first=await call('/children/'+child+'/invitations','POST',{},'parent');assert.equal(first.status,201);
   let jar='',csrf='';

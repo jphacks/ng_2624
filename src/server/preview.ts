@@ -83,6 +83,19 @@ function imageMetadata(html: string, base: URL): URL | null {
       try { return httpsUrl(attributes.content, base); } catch { /* Try other metadata. */ }
     }
   }
+  for (const script of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const parsed = JSON.parse(script[1]);
+      const nodes = Array.isArray(parsed) ? parsed : [parsed, ...(Array.isArray(parsed?.['@graph']) ? parsed['@graph'] : [])];
+      for (const node of nodes) {
+        if (!node || !(Array.isArray(node['@type']) ? node['@type'] : [node['@type']]).includes('Product')) continue;
+        for (const image of Array.isArray(node.image) ? node.image : [node.image]) {
+          const value = typeof image === 'string' ? image : image?.url ?? image?.contentUrl;
+          if (typeof value === 'string') { try { return httpsUrl(value, base); } catch { /* Try another image. */ } }
+        }
+      }
+    } catch { /* Ignore malformed structured data. */ }
+  }
   if (amazonHost(base)) for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
     if (!/\sid=["'](?:landingImage|imgBlkFront|main-image)["']/i.test(tag)) continue;
     const attributes: Record<string, string> = {};
@@ -101,6 +114,70 @@ function imageMetadata(html: string, base: URL): URL | null {
   }
   return null;
 }
+function yenPrice(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const text = String(value).trim().replace(/,/g, '');
+  if (!/^\d+(?:\.0+)?$/.test(text)) return null;
+  const price = Number(text);
+  return Number.isSafeInteger(price) && price > 0 ? price : null;
+}
+function priceMetadata(html: string, base: URL): number | null {
+  for (const script of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const root: unknown = JSON.parse(script[1]);
+      const nodes: unknown[] = Array.isArray(root) ? [...root] : [root];
+      for (let i = 0; i < nodes.length && i < 100; i++) {
+        const node = nodes[i];
+        if (!node || typeof node !== 'object') continue;
+        const record = node as Record<string, unknown>;
+        if (Array.isArray(record['@graph'])) nodes.push(...record['@graph']);
+        const types = Array.isArray(record['@type']) ? record['@type'] : [record['@type']];
+        if (!types.includes('Product')) continue;
+        const offers = Array.isArray(record.offers) ? record.offers : [record.offers];
+        for (const offer of offers) {
+          if (!offer || typeof offer !== 'object') continue;
+          const data = offer as Record<string, unknown>;
+          const price = data.priceCurrency === 'JPY' ? yenPrice(data.price) : null;
+          if (price !== null) return price;
+        }
+      }
+    } catch { /* Ignore malformed structured data. */ }
+  }
+  const meta: Record<string, string> = {};
+  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    const attributes: Record<string, string> = {};
+    for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) attributes[match[1].toLowerCase()] = decodeHtml(match[2] ?? match[3] ?? match[4]);
+    meta[(attributes.property ?? attributes.name ?? '').toLowerCase()] = attributes.content;
+  }
+  for (const prefix of ['product:price', 'og:price']) {
+    const price = meta[prefix + ':currency'] === 'JPY' ? yenPrice(meta[prefix + ':amount']) : null;
+    if (price !== null) return price;
+  }
+  if (amazonHost(base)) {
+    // Only current product price widgets; never arbitrary yen amounts in recommendations.
+    for (const match of html.matchAll(/<span\b[^>]*id=["'](?:priceblock_ourprice|priceblock_dealprice|priceblock_saleprice|price_inside_buybox)["'][^>]*>([^<]*)<\/span>/gi)) {
+      const amount = decodeHtml(match[1]).trim().match(/^[￥¥]\s*([\d,]+)(?:\.00)?$/)?.[1];
+      const price = yenPrice(amount);
+      if (price !== null) return price;
+    }
+    const container = html.match(/<(div|span)\b[^>]*id=["'](?:corePrice_feature_div|corePriceDisplay_desktop_feature_div|apex_desktop)["'][^>]*>/i);
+    if (container) {
+      const rest = html.slice(container.index! + container[0].length, container.index! + container[0].length + 12000);
+      const tags = new RegExp('<(/?)' + container[1] + '\\b[^>]*>', 'gi');
+      let depth = 1, currentPrice = '';
+      for (const tag of rest.matchAll(tags)) {
+        depth += tag[1] ? -1 : 1;
+        if (!depth) { currentPrice = rest.slice(0, tag.index); break; }
+      }
+      for (const widget of currentPrice.matchAll(/<span\b[^>]*class=["']([^"']*\ba-price\b[^"']*)["'][^>]*>[\s\S]{0,1200}?<span\b[^>]*class=["']a-offscreen["'][^>]*>([^<]*)<\/span>/gi)) {
+        if (widget[1].split(/\s+/).includes('a-text-price')) continue;
+        const price = yenPrice(decodeHtml(widget[2]).trim().match(/^[￥¥]\s*([\d,]+)$/)?.[1]);
+        if (price !== null) return price;
+      }
+    }
+  }
+  return null;
+}
 function validImage(body: Buffer, type: string): boolean {
   return (type === 'image/png' && body.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
     (type === 'image/jpeg' && body[0] === 255 && body[1] === 216 && body[2] === 255) ||
@@ -109,6 +186,8 @@ function validImage(body: Buffer, type: string): boolean {
 }
 export function createProductPreview(deps: Dependencies = dependencies) {
   const cache = new Map<string, { expires: number; image: PreviewImage | null }>();
+  const metadata = new Map<string, { priceJpy: number | null; checkedAt: string }>();
+  const imageHints = new Map<string, string>();
   const pending = new Map<string, Promise<PreviewImage | null>>();
   async function read(url: URL, limit: number, signal: AbortSignal): Promise<{ response: Response; url: URL }> {
     for (let redirects = 0; redirects <= 3; redirects++) {
@@ -129,14 +208,19 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     }
     throw new Error('Too many redirects');
   }
-  async function retrieve(productUrl: string, signal: AbortSignal, imageHint?: string | null): Promise<PreviewImage | null> {
+  async function retrieve(productUrl: string, signal: AbortSignal, imageHint?: string | null, needPrice = false): Promise<PreviewImage | null> {
     try {
       const product = httpsUrl(productUrl);
       let imageUrl = amazonHost(product) ? amazonImage(imageHint) : null;
-      if (!imageUrl) {
-        const page = await read(product, amazonHost(product) ? AMAZON_HTML_LIMIT : HTML_LIMIT, signal);
-        if (!/^text\/html(?:;|$)/i.test(String(page.response.headers['content-type']))) return null;
-        imageUrl = imageMetadata(page.response.body.toString('utf8'), page.url);
+      if (!imageUrl || needPrice) {
+        try {
+          const page = await read(product, amazonHost(product) ? AMAZON_HTML_LIMIT : HTML_LIMIT, signal);
+          if (!/^text\/html(?:;|$)/i.test(String(page.response.headers['content-type']))) throw new Error('Not a product page');
+          const html = page.response.body.toString('utf8');
+          if (metadata.size >= 32) metadata.delete(metadata.keys().next().value!);
+          metadata.set(productUrl, { priceJpy: priceMetadata(html, page.url), checkedAt: new Date().toISOString() });
+          imageUrl ??= imageMetadata(html, page.url);
+        } catch { if (!imageUrl) return null; }
       }
       if (!imageUrl) return null;
       const image = await read(imageUrl, IMAGE_LIMIT, signal);
@@ -144,15 +228,21 @@ export function createProductPreview(deps: Dependencies = dependencies) {
       return validImage(image.response.body, contentType) ? { body: image.response.body, contentType } : null;
     } catch { return null; }
   }
-  async function fetchProductImage(productUrl: string, imageHint?: string | null): Promise<PreviewImage | null> {
+  async function fetchProductImage(productUrl: string, imageHint?: string | null, needPrice = false): Promise<PreviewImage | null> {
+    const hint = amazonImage(imageHint);
+    if (hint) {
+      if (imageHints.size >= 64) imageHints.delete(imageHints.keys().next().value!);
+      imageHints.set(productUrl, hint.href);
+    }
+    imageHint = hint?.href ?? imageHints.get(productUrl);
     const cached = cache.get(productUrl);
-    if (cached && cached.expires > Date.now() && (cached.image || !imageHint)) return cached.image;
+    if (cached && cached.expires > Date.now() && (cached.image || !imageHint) && (!needPrice || metadata.has(productUrl))) return cached.image;
     const existing = pending.get(productUrl); if (existing) return existing;
     if (pending.size >= 4) return null;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<null>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, 8000); });
-    const work = Promise.race([retrieve(productUrl, controller.signal, imageHint), deadline]).then(image => {
+    const work = Promise.race([retrieve(productUrl, controller.signal, imageHint, needPrice), deadline]).then(image => {
       cache.delete(productUrl);
       if (cache.size >= 32) cache.delete(cache.keys().next().value!);
       cache.set(productUrl, { expires: Date.now() + 5 * 60_000, image }); return image;
@@ -202,8 +292,11 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     try { return await Promise.race([work, timeout]); } finally { clearTimeout(timer!); }
   }
   async function enrichProduct(product: ProductCandidate): Promise<ProductCandidate> {
-    const image = await fetchProductImage(product.productUrl, product.imageUrl);
-    return { ...product, imageUrl: image ? `/api/products/${encodeURIComponent(product.id)}/image` : null };
+    const image = await fetchProductImage(product.productUrl, product.imageUrl, product.priceJpy === null);
+    const found = metadata.get(product.productUrl);
+    const price = product.priceJpy === null && found?.priceJpy != null
+      ? { priceJpy: found.priceJpy, priceCheckedAt: found.checkedAt } : {};
+    return { ...product, ...price, imageUrl: image ? `/api/products/${encodeURIComponent(product.id)}/image` : null };
   }
   async function prepareProduct(product: ProductCandidate): Promise<ProductCandidate | null> {
     const productUrl = await resolveAmazonProductUrl(product.productUrl);

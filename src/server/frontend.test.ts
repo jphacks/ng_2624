@@ -242,7 +242,7 @@ test('demo tools do not change navigation or welcome layout',async()=>{
   assert.equal(demo.nodes['#demo-tools'].hidden,false);
   assert.equal(regular.nodes['#demo-tools'].hidden,true);
   assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/デモ操作/);
-  assert.equal([...demo.nodes['#navigation'].innerHTML.matchAll(/<a href=/g)].length,3);
+  assert.equal([...demo.nodes['#navigation'].innerHTML.matchAll(/<a href=/g)].length,authenticated?2:3);
   assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/href="#chores"/);
  }
 });
@@ -599,4 +599,17 @@ test('画像URLなしで保存された商品も画像APIから取得を試み�
  ui.state.session={...session,user:{...session.user,role:'child'}};
  await ui.chat('images');
  assert.match(ui.nodes['#content'].innerHTML,/<img class="product-image" src="\/api\/products\/game-1\/image"/);
+});
+
+test('商品カードは画像・商品名・円価格を表示し説明文を表示しない',async()=>{
+ const ui=await frontend(async path=>{
+  if(path==='/conversations/card')return {conversationId:'card',messages:[],products:[{id:'game-1',name:'ゲーム',imageUrl:'/api/products/game-1/image',productUrl:'https://www.amazon.co.jp/dp/B000000001',priceJpy:5980,description:'不要な商品解説',recommendationReason:'不要な推薦文'}]};
+  return basic(path);
+ });
+ ui.state.session={...session,user:{...session.user,role:'child'}};
+ await ui.chat('card');
+ const html=ui.nodes['#content'].innerHTML;
+ assert.match(html,/ゲーム/);assert.match(html,/5,980円/);
+ assert.match(html,/src="\/api\/products\/game-1\/image"/);
+ assert.doesNotMatch(html,/不要な商品解説|不要な推薦文|product-reason|5,980 ポイント/);
 });

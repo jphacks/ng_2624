@@ -45,6 +45,41 @@ export function createApp(config: Config, dep: Dependencies) {
   const limits = new Map<string, { count: number; until: number }>();
   function rate(key: string, max: number, ms: number) { const now = Date.now(); if (limits.size > 5000) for (const [k, v] of limits) if (v.until < now) limits.delete(k); assert(limits.size < 10000, 429, 'RATE_LIMITED', 'しばらく待ってからお試しください。'); let v = limits.get(key); if (!v || v.until < now) { v = { count: 0, until: now + ms }; limits.set(key, v); } assert(++v.count <= max, 429, 'RATE_LIMITED', 'しばらく待ってからお試しください。'); }
   async function one(table: string, query: Record<string, string>, required = true): Promise<Row> { const r = (await db.list(table, { ...query, limit: '1' }))[0]; if (required) assert(r, 404, 'NOT_FOUND', 'データが見つかりません。'); return r; }
+  // Restore metadata for saved search results without changing proposal or goal amounts.
+  const hydration = new Map<string, { until: number; pending: Promise<ProductCandidate> }>();
+  async function hydrateProducts(products: ProductCandidate[]): Promise<ProductCandidate[]> {
+    return Promise.all(products.map(async saved => {
+      let product = saved;
+      try {
+        const stored = await one('products', { id: eq(saved.id) }, false);
+        if (stored) product = { ...saved, priceJpy: stored.price_jpy ?? saved.priceJpy, priceCheckedAt: stored.price_checked_at ?? saved.priceCheckedAt,
+          imageUrl: stored.image_url || saved.imageUrl, productUrl: stored.product_url || saved.productUrl };
+        if (product.priceJpy != null && product.imageUrl) return product;
+        const key = `${product.id}:${product.productUrl}`, now = Date.now();
+        let cached = hydration.get(key);
+        if (!cached || cached.until <= now) {
+          if (hydration.size >= 200) { for (const [k, entry] of hydration) if (entry.until <= now) hydration.delete(k); }
+          if (hydration.size >= 200) hydration.delete(hydration.keys().next().value!);
+          const candidate = product;
+          const pending = (async () => {
+            const recovered = await dep.enrich(candidate).catch(() => null);
+            if (!recovered) return candidate;
+            if (candidate.priceJpy == null && recovered.priceJpy != null)
+              await db.update('products', { id: eq(candidate.id), price_jpy: 'is.null' }, { price_jpy: recovered.priceJpy, price_checked_at: recovered.priceCheckedAt }).catch(() => {});
+            if (!candidate.imageUrl && recovered.imageUrl)
+              await db.update('products', { id: eq(candidate.id), image_url: 'is.null' }, { image_url: recovered.imageUrl }).catch(() => {});
+            if (recovered.productUrl !== candidate.productUrl)
+              await db.update('products', { id: eq(candidate.id), product_url: eq(candidate.productUrl) }, { product_url: recovered.productUrl }).catch(() => {});
+            return recovered;
+          })();
+          cached = { until: now + 300000, pending }; hydration.set(key, cached);
+        }
+        const recovered = await cached.pending;
+        return { ...product, priceJpy: product.priceJpy ?? recovered.priceJpy, priceCheckedAt: product.priceCheckedAt ?? recovered.priceCheckedAt,
+          imageUrl: product.imageUrl || recovered.imageUrl, productUrl: recovered.productUrl };
+      } catch { return product; }
+    }));
+  }
   async function family(user: Row, childId: string) { return db.rpc('wb_family', { p_actor_id: user.id, p_child_id: uuid(childId) }); }
   async function children(user: Row): Promise<Row[]> {
     if (user.role === 'child') return [childView(user)];
@@ -83,7 +118,7 @@ export function createApp(config: Config, dep: Dependencies) {
     const messages = await db.list('messages', { conversation_id: eq(c.id), order: 'sequence_no.desc', limit: '100' });
     const p = await currentProposal(user, c);
     const phase = await db.rpc('wb_consultation_phase', { p_actor_id: user.id, p_conversation_id: c.id });
-    return { mode: 'consultation', phase, canMessage: phase === 'consultation', negotiationId: p?.negotiation_id || null, conversationId: c.id, childId: c.child_id, products: c.products, selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, latestAIOutput: c.latest_ai_output, messages: messages.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })) };
+    return { mode: 'consultation', phase, canMessage: phase === 'consultation', negotiationId: p?.negotiation_id || null, conversationId: c.id, childId: c.child_id, products: await hydrateProducts(c.products), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, latestAIOutput: c.latest_ai_output, messages: messages.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })) };
   }
   async function proposalsFor(user: Row, childId: string): Promise<Row[]> {
     const n = await db.list('negotiations', { child_id: eq(childId), ...(user.role === 'parent' ? { parent_id: eq(user.id) } : {}), order: 'created_at.desc', limit: '100' });
@@ -107,7 +142,7 @@ export function createApp(config: Config, dep: Dependencies) {
     const draft = await one('proposals', { proposed_by: eq(user.id), based_on_proposal_id: eq(p.id), status: 'eq.draft', order: 'created_at.desc' }, false);
     const canMessage = n.status === 'revision_requested' && p.status === 'rejected';
     return { mode: 'negotiation', negotiationId: n.id, childId: n.child_id, phase: canMessage ? 'negotiation' : n.status === 'awaiting_approval' ? 'awaiting_response' : 'closed', canMessage,
-      products: n.products.length ? n.products : [mapProduct(await one('products', { id: eq(p.product_id) }))], selectedProductId: n.products.length ? n.selected_product_id : p.product_id,
+      products: await hydrateProducts(n.products.length ? n.products : [mapProduct(await one('products', { id: eq(p.product_id) }))]), selectedProductId: n.products.length ? n.selected_product_id : p.product_id,
       currentProposal: mapProposal(p), draftProposal: canMessage && draft?.based_on_version === p.version ? mapProposal(draft) : null,
       proposalView: await proposalView(user,p), latestAIOutput: n.latest_ai_output,
       messages: messages.reverse().map(m => ({ id: m.id, sender: m.sender === 'user' ? m.user_id === n.child_id ? 'child' : 'parent' : m.sender, own: m.user_id === user.id, content: m.content, createdAt: m.created_at })) };
@@ -126,7 +161,7 @@ export function createApp(config: Config, dep: Dependencies) {
       const p=await sharedProposal(n), view=await proposalView(user,p), configChild=await settings(n.child_id);
       const history=await db.list('negotiation_messages',{negotiation_id:eq(n.id),order:'sequence_no.desc',limit:'40'});
       if(!n.products.length){n.products=[view.product];n.selected_product_id=p.product_id;await db.update('negotiations',{id:eq(n.id),ai_lock_id:eq(lockId)},{products:n.products,selected_product_id:p.product_id});}
-      const products=[...n.products];if(!products.some(x=>x.id===p.product_id))products.push(view.product);
+      const products=await hydrateProducts(n.products);if(!products.some(x=>x.id===p.product_id))products.push(view.product);
       const input:AIInput={requestId:randomUUID(),now:new Date().toISOString(),role:user.role,mode:'negotiation',message,history:[],profile:null,
         negotiationHistory:history.reverse().filter(m=>['user','assistant'].includes(m.sender)).map(m=>({id:m.id,sender:m.sender==='assistant'?'assistant':m.user_id===n.child_id?'child':'parent',content:m.content,createdAt:m.created_at})),
         sharedConditions:[],constraints:configChild.constraints,products:products.map(p=>({...p,imageUrl:null})),selectedProductId:n.selected_product_id,currentProposal:mapProposal(p),negotiationResult:view.negotiationResult};
@@ -147,7 +182,7 @@ export function createApp(config: Config, dep: Dependencies) {
       await family(user, c.child_id || user.id);
       const [p, pref, configChild, history] = await Promise.all([currentProposal(user, c), profile(user), settings(c.child_id || user.id), db.list('messages', { conversation_id: eq(c.id), order: 'sequence_no.desc', limit: '40' })]);
       const pv = p ? await proposalView(user, p) : null;
-      const products = [...c.products];
+      const products = await hydrateProducts(c.products);
       if (pv && !products.some(x => x.id === pv.product.id)) products.push(pv.product);
       const child = await one('users', { id: eq(c.child_id || user.id) });
       const input: AIInput = { searchQuery, childContext: { age: age(child.birth_date), gradeLevel: childView(child).gradeLevel }, requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, expectations: [] } }, sharedConditions: [], constraints: configChild.constraints, products: products.map(p => ({ ...p, imageUrl: null })), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };

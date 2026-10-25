@@ -146,3 +146,54 @@ test('保存済みの引用URLからも実際の商品画像を再取得でき�
  assert.deepEqual(await preview.fetchResolvedProductImage('https://vertexaisearch.cloud.google.com/grounding-api-redirect/game'),{body:png,contentType:'image/png'});
  assert.equal(await preview.fetchResolvedProductImage('https://evil.test/product'),null);
 });
+
+test('one product HTML read restores actual JPY offer and image together', async () => {
+  let pageReads = 0;
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => {
+    if (url.hostname !== 'www.amazon.co.jp') return pngResponse();
+    pageReads++;
+    return html('<script type="application/ld+json">{"@type":"Product","offers":{"priceCurrency":"JPY","price":"6,980"}}</script><meta property="og:image" content="https://m.media-amazon.com/images/I/game.png">');
+  } });
+  const candidate = { ...product, priceJpy: null, productUrl: 'https://www.amazon.co.jp/dp/B000000001', imageUrl: null };
+  const result = await preview.enrichProduct(candidate);
+  assert.equal(result.priceJpy, 6980);
+  assert.ok(result.priceCheckedAt && !Number.isNaN(Date.parse(result.priceCheckedAt)));
+  assert.equal(result.imageUrl, '/api/products/product-1/image');
+  await preview.enrichProduct(candidate);
+  assert.equal(pageReads, 1);
+});
+
+test('JPY metadata and current Amazon price widgets restore prices without inventing numbers', async () => {
+  for (const [body, expected] of [
+    ['<meta property="product:price:currency" content="JPY"><meta property="product:price:amount" content="4990">', 4990],
+    ['<span id="priceblock_ourprice">￥3,980</span>', 3980],
+    ['<div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">￥7,980</span></span></div>', 7980],
+    ['<script type="application/ld+json">{"@type":"Product","offers":{"priceCurrency":"USD","price":39}}</script>', null],
+    ['<script type="application/ld+json">{"@type":"Product","offers":{"price":3999}}</script><p>ポイント 100 円</p>', null],
+    ['<div id="recommendations"><span class="a-price"><span class="a-offscreen">￥1,000</span></span></div>', null],
+    ['<div id="corePrice_feature_div"></div><div id="recommendations"><span class="a-price"><span class="a-offscreen">￥1,000</span></span></div>', null],
+    ['<div id="corePrice_feature_div"><span class="a-price a-text-price"><span class="a-offscreen">￥9,980</span></span><span class="a-price"><span class="a-offscreen">￥7,980</span></span></div>', 7980],
+  ] as const) {
+    const preview = createProductPreview({ resolve: async () => [publicAddress], read: async () => html(body) });
+    const result = await preview.enrichProduct({ ...product, priceJpy: null, imageUrl: null, productUrl: 'https://www.amazon.co.jp/dp/B000000001' });
+    assert.equal(result.priceJpy, expected, body);
+  }
+});
+
+test('failed price lookup preserves a trusted native image hint', async () => {
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => {
+    if (url.hostname === 'www.amazon.co.jp') throw new Error('Amazon denied HTML');
+    return pngResponse();
+  } });
+  const result = await preview.enrichProduct({ ...product, priceJpy: null, productUrl: 'https://www.amazon.co.jp/dp/B000000001', imageUrl: 'https://m.media-amazon.com/images/I/game.png' });
+  assert.equal(result.priceJpy, null);
+  assert.equal(result.imageUrl, '/api/products/product-1/image');
+});
+
+test('JSON-LD Product image objects support link previews without OG tags', async () => {
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => url.hostname === 'www.amazon.co.jp'
+    ? html('<script type="application/ld+json">{"@graph":[{"@type":"Product","image":{"url":"https://m.media-amazon.com/images/I/real.png"},"offers":{"priceCurrency":"JPY","price":7980}}]}</script>') : pngResponse() });
+  const result = await preview.enrichProduct({ ...product, priceJpy: null, imageUrl: null, productUrl: 'https://www.amazon.co.jp/dp/B000000001' });
+  assert.equal(result.imageUrl, '/api/products/product-1/image');
+  assert.equal(result.priceJpy, 7980);
+});
