@@ -115,13 +115,12 @@ PCでは保護者として、スマートフォンでは子どもとして操作
 
 | フォルダ・ファイル | 内容 | 詳しい説明 |
 |---|---|---|
-| [frontend/](frontend/) | 親子が利用する画面。HTML・CSS・JavaScriptで構成 | [画面設計](docs/frontend-design.md) |
+| [frontend/](frontend/) | 親子が利用する画面。HTML・CSS・JavaScriptで構成 | [画面設計](app.js) |
 | [src/server/](src/server/) | ログイン、権限管理、データ保存、外部APIとの通信を担当するバックエンド | [SETUP.md](SETUP.md) |
 | [src/ai/](src/ai/) | ぽぽの会話、商品検索、提案の下書き、親子の交渉を担当 | [AIモジュール](src/ai/README.md) |
 | [supabase/migrations/](supabase/migrations/) | DBのテーブル、アクセス権限、ポイントや提案の処理 | [SETUP.md](SETUP.md) |
 | [src/shared/](src/shared/) | AIとサーバーの間で共有するデータの型 | [types.ts](src/shared/types.ts) |
 | [demo/](demo/) | Googleログイン・Supabaseなしで試せるローカルデモ | [README.md](demo/README.md) |
-| [docs/](docs/) | 画面の設計資料 | [frontend-design.md](docs/frontend-design.md) |
 
 ### 担当ごとの工夫
 
