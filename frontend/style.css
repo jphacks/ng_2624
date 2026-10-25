@@ -1296,7 +1296,7 @@ body:has(#content.chat-layout-v3) {
   background: #fff;
   box-shadow: 0 -4px 18px #214d6510;
 }
-#navigation a { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 8px 4px; text-align: center; font-size: 13px; }
+#navigation a { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 8px 4px; text-align: center; font-size: 13px; }
 #navigation .nav-icon { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 /* On narrow phones, stack each icon above its label. */
 @media (max-width: 420px) {
@@ -1453,3 +1453,5 @@ body:has(#content.chat-layout-v3) {
 form[data-form="reason"] textarea{min-height:160px}
 
 .service-credits{margin-top:32px;padding-top:16px;border-top:1px solid var(--border);overflow-wrap:anywhere}
+
+.proposal-home-return{align-self:center;width:auto;max-width:100%;display:inline-flex;align-items:center;justify-content:center;padding:12px 24px;text-align:center;text-decoration:none}

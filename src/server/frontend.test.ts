@@ -243,8 +243,8 @@ test('demo tools do not change navigation or welcome layout',async()=>{
   assert.equal(demo.nodes['#demo-tools'].hidden,false);
   assert.equal(regular.nodes['#demo-tools'].hidden,true);
   assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/デモ操作/);
-  assert.equal([...demo.nodes['#navigation'].innerHTML.matchAll(/<a href=/g)].length,authenticated?2:3);
-  assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/href="#chores"/);
+  assert.equal([...demo.nodes['#navigation'].innerHTML.matchAll(/<a href=/g)].length,authenticated?3:4);
+  assert.match(demo.nodes['#navigation'].innerHTML,/href="#chores"/);
  }
 });
 
@@ -853,5 +853,40 @@ test('Yahoo!クレジットは親・子どもの設定の最下部にだけ表�
   assert.match(html,/<footer class="service-credits" aria-label="クレジット"><h2>クレジット<\/h2><p>Webサービス by Yahoo! JAPAN （https:\/\/developer.yahoo.co.jp\/sitemap\/）<\/p><\/footer>$/);
   assert.equal((html.match(/Webサービス by Yahoo! JAPAN/g)||[]).length,1);
   await ui.go('#home');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/Webサービス by Yahoo! JAPAN/);
+ }
+});
+
+test('合意後は親の案内文を省き、子どもにやさしい言葉と中央揃え用のホームボタンを表示する',async()=>{
+ for(const role of ['parent','child']){
+  const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/proposals/agreed'?{proposal:{id:'agreed',status:'agreed',persuasionText:'友達と遊びたい'},product:{id:'product',name:'ゲーム',priceJpy:3500,productUrl:'https://store.shopping.yahoo.co.jp/shop/item.html'}}:basic(path));
+  await ui.go('#proposal/agreed');const html=ui.nodes['#content'].innerHTML;
+  assert.doesNotMatch(html,/目標に登録しました。お手伝いでポイントを貯めていこう。/);
+  if(role==='parent')assert.doesNotMatch(html,/できる おてつだいから|ポイントを ためていこうね/);
+  else assert.match(html,/できる おてつだいから、すこしずつ ポイントを ためていこうね。/);
+  assert.match(html,/<a class="btn-primary proposal-home-return" href="#home">/);
+ }
+});
+
+test('ホームの主目標・小さい目標の画像は目標IDではなく商品IDで取得する',async()=>{
+ for(const role of ['parent','child']){
+  const goals=[{id:'goal-main',productId:'product-main',name:'主目標',size:'large',targetAmountYen:3500,status:'active',imageUrl:'https://item-shopping.c.yimg.jp/i/g/main'}, {id:'goal-sub',productId:'product-sub',name:'小目標',size:'small',targetAmountYen:1000,status:'active',imageUrl:'https://item-shopping.c.yimg.jp/i/g/sub'}];
+  const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path.startsWith('/dashboard')?{...dashboard,balanceYen:0,weeklyPaceYen:0,goals}:path==='/children'?{children:[{childId:'child',displayName:'子ども'}]}:basic(path));
+  await ui.go(role==='parent'?'#child-home/child':'#home');const html=ui.nodes['#content'].innerHTML;
+  assert.match(html,/src="\/api\/products\/product-main\/image"/);assert.match(html,/src="\/api\/products\/product-sub\/image"/);
+  assert.doesNotMatch(html,/src="(?:\/api\/products\/goal-|https:\/\/item-shopping)/);
+  assert.match(html,/data-action="feature-goal" data-id="goal-sub"/);
+  if(role==='parent')assert.match(html,/data-action="purchase" data-id="goal-main"/);
+ }
+});
+
+test('お手伝いは下部タブから開き、ホームの重複ボタンは表示しない',async()=>{
+ for(const role of ['parent','child']){
+  const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/children'?{children:[{childId:'child',displayName:'こども'}]}:path.startsWith('/dashboard')?{...dashboard,children:[{childId:'child',displayName:'こども'}]}:basic(path));
+  await ui.go(role==='parent'?'#child-home/child':'#home');
+  assert.match(ui.nodes['#navigation'].innerHTML,/#home[^]*#chores[^]*#settings/);
+  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/href="#chores"/);
+  if(role==='child')assert.equal((ui.nodes['#navigation'].innerHTML.match(/<a href=/g)||[]).length,4);
+  await ui.go('#chores');assert.match(ui.nodes['#content'].innerHTML,/<section class="tasks">/);
+  await ui.go('#home');assert.match(ui.nodes['#navigation'].innerHTML,/href="#chores"/);
  }
 });
