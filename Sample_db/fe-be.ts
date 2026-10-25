@@ -1,4 +1,4 @@
-import type { AIUserProfile, PurchaseConstraints, RewardGuidelines, ProposalDecision } from '../src/shared/types.ts';
+import type { AIUserProfile, PurchaseConstraints, ProposalDecision } from '../src/shared/types.ts';
 
 /** 設定更新は省略した項目を維持し、nullは未設定、[]はリストの全消去を表す。 */
 export interface ProfilePatch {
@@ -12,7 +12,6 @@ export interface OwnProfileUpdate {
 }
 export interface ChildSettingsUpdate {
   childId: string;
-  rewardGuidelines?: Partial<RewardGuidelines>;
   constraints?: Partial<PurchaseConstraints>;
 }
 export interface ProposalReference { proposalId: string; version: number }

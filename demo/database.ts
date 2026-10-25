@@ -11,7 +11,7 @@ export async function createLocalDatabase() {
  create function auth.uid() returns uuid language sql as 'select null::uuid';`);
  for(const f of (await readdir(new URL('../supabase/migrations/', import.meta.url))).filter(x=>x.endsWith('.sql')).sort()) await pg.exec((await readFile(new URL('../supabase/migrations/'+f, import.meta.url),'utf8')).replace('create extension if not exists pgcrypto;',''));
  const col=(s:string)=>{if(!/^[a-z_]+$/.test(s))throw Error('Invalid SQL identifier');return '"'+s+'"';};
- const jsonFields=new Set(['products','latest_ai_output','reward_guidelines','constraints','chore_preferences','search_metadata']);
+ const jsonFields=new Set(['products','latest_ai_output','constraints','chore_preferences','search_metadata']);
  const value=(k:string,v:any)=>v!==null&&typeof v==='object'&&(jsonFields.has(k)||!Array.isArray(v))?JSON.stringify(v):v;
  function filters(q:Record<string,string>,params:unknown[]) {return Object.entries(q).filter(([k])=>!['select','limit','order'].includes(k)).map(([k,v])=>{
   const c=col(k);if(v==='is.null')return c+' is null';

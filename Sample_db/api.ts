@@ -1,10 +1,10 @@
 import type { AIOutput, AIUserProfile, ChatMessage, NegotiationMessage, NegotiationResult,
-  ProductCandidate, Proposal, PurchaseConstraints, RewardGuidelines, SharedCondition, UserRole } from '../src/shared/types.ts';
+  ProductCandidate, Proposal, PurchaseConstraints, SharedCondition, UserRole } from '../src/shared/types.ts';
 import type { FEOperation } from './fe-be.ts';
 
 export interface ProfileView { displayName: string; profile: AIUserProfile }
 export interface ChildView { childId: string; displayName: string }
-export interface ChildSettingsView { childId: string; rewardGuidelines: RewardGuidelines; constraints: PurchaseConstraints }
+export interface ChildSettingsView { childId: string; constraints: PurchaseConstraints }
 export interface ChatView {
   products: ProductCandidate[];
   selectedProductId: string | null;

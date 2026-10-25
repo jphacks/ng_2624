@@ -6,6 +6,6 @@ export type { GeminiOptions } from './gemini.ts';
 export { ConversationError } from './errors.ts';
 export type { ConversationErrorCode } from './errors.ts';
 export type {
-    NegotiationMessage, GoalSize, RewardGuidelines, AIInput, AIOutput, AIUserProfile, PurchaseConstraints, ProductCandidate,
+    NegotiationMessage, GoalSize, AIInput, AIOutput, AIUserProfile, PurchaseConstraints, ProductCandidate,
     ProposalDraft, SearchMetadata, SearchSource, SharedCondition, NegotiationResult, NegotiationContext, ProductSearchContext,
 } from '../shared/types.ts';

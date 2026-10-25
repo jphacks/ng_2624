@@ -78,6 +78,36 @@ test('Amazon product pages over 512KB can use their main image without OG metada
   } });
   assert.deepEqual(await preview.fetchProductImage('https://www.amazon.co.jp/dp/B000000001'), { body: png, contentType: 'image/png' });
 });
+test('Amazon dynamic main image metadata supplies a real CDN image', async () => {
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url =>
+    url.hostname === 'www.amazon.co.jp' ? html('<img id="landingImage" data-a-dynamic-image="{&quot;https://m.media-amazon.com/images/I/actual.png&quot;:[600,600]}">') : pngResponse() });
+  assert.deepEqual(await preview.fetchProductImage('https://www.amazon.co.jp/dp/B000000001'), { body: png, contentType: 'image/png' });
+});
+test('Google HTML source redirects resolve a unique real Amazon destination and its image', async () => {
+  const source = 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/source';
+  const direct = 'https://www.amazon.co.jp/dp/B000000001';
+  for (const redirect of [`<a href="${direct}">Continue</a>`, `<meta http-equiv="refresh" content="0;url=${direct}">`]) {
+    const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url =>
+      url.hostname === 'vertexaisearch.cloud.google.com' ? html(redirect) : url.hostname === 'www.amazon.co.jp'
+        ? html('<img id="landingImage" src="https://m.media-amazon.com/images/I/actual.png">') : pngResponse() });
+    const result = await preview.prepareProduct({ ...product, productUrl: source, sourceUrls: [source] });
+    assert.equal(result?.productUrl, direct);
+    assert.equal(result?.imageUrl, '/api/products/product-1/image');
+  }
+});
+test('HTML source resolution rejects ambiguous, oversized, unsafe and unrelated destinations', async () => {
+  for (const body of [
+    '<a href="https://www.amazon.co.jp/dp/B000000001">A</a><a href="https://www.amazon.co.jp/dp/B000000002">B</a>',
+    '<meta http-equiv="refresh" content="0;url=https://127.0.0.1/dp/B000000001">',
+    '<a href="https://amazon.co.jp.evil.test/dp/B000000001">A</a>',
+    ' '.repeat(512 * 1024 + 1),
+  ]) {
+    let calls = 0;
+    const preview = createProductPreview({ resolve: async () => [publicAddress], read: async () => { calls++; return html(body); } });
+    assert.equal(await preview.resolveAmazonProductUrl('https://vertexaisearch.cloud.google.com/grounding-api-redirect/source'), null);
+    assert.equal(calls, 1);
+  }
+});
 test('Amazon source resolution accepts product paths and rejects other destinations or unsafe DNS', async () => {
   const direct='https://www.amazon.co.jp/dp/B000000000';let calls=0;
   const preview=createProductPreview({resolve:async()=>[publicAddress],read:async()=>{calls++;return {status:302,headers:{location:direct},body:Buffer.alloc(0)};}});
@@ -105,4 +135,14 @@ test('検索の引用リンクの解決失敗でゲーム候補を削除せず�
   for(const value of ['https://evil.test/product','https://vertexaisearch.cloud.google.com.evil.test/grounding-api-redirect/id','http://vertexaisearch.cloud.google.com/grounding-api-redirect/id','https://vertexaisearch.cloud.google.com/other']){
     assert.equal(await preview.prepareProduct({...candidate,productUrl:value,sourceUrls:[value]}),null);
   }
+});
+
+test('保存済みの引用URLからも実際の商品画像を再取得できる',async()=>{
+ const preview=createProductPreview({resolve:async()=>[publicAddress],read:async url=>{
+  if(url.hostname==='vertexaisearch.cloud.google.com')return html('<a href="https://www.amazon.co.jp/dp/B000000001">Amazon商品</a>');
+  if(url.hostname==='www.amazon.co.jp')return html('<meta property="og:image" content="https://m.media-amazon.com/images/I/game.jpg">');
+  return pngResponse();
+ }});
+ assert.deepEqual(await preview.fetchResolvedProductImage('https://vertexaisearch.cloud.google.com/grounding-api-redirect/game'),{body:png,contentType:'image/png'});
+ assert.equal(await preview.fetchResolvedProductImage('https://evil.test/product'),null);
 });

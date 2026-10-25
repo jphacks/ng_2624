@@ -36,7 +36,6 @@ export async function createDemo(config: Config, dependencies: Dependencies) {
       await local.db.rpc('wb_register_parent', { p_user_id: parentId, p_display_name: 'デモの保護者' });
       await local.db.rpc('wb_create_child', { p_actor_id: parentId, p_child_id: childId, p_display_name: 'デモの子ども', p_birth_date: '2017-04-01', p_gender: null, p_grade_level: null, p_grade_base_school_year: null });
       await local.db.update('users', {}, { onboarding_completed: true });
-      await local.db.update('child_settings', {child_id:'eq.'+childId}, {reward_guidelines:{smallJpy:1000,mediumJpy:3000,largeJpy:10000}});
       return { ...local, parentId, childId, app: createApp(config, { ...dependencies, db: local.db }) };
     } catch (error) { await local.pg.close(); throw error; }
   }

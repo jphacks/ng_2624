@@ -89,6 +89,15 @@ function imageMetadata(html: string, base: URL): URL | null {
     for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attributes[match[1].toLowerCase()] = decodeHtml(match[2] ?? match[3]);
     const image = amazonImage(attributes['data-old-hires']) ?? amazonImage(attributes.src);
     if (image) return image;
+    try {
+      const dynamic: unknown = JSON.parse(attributes['data-a-dynamic-image'] ?? '{}');
+      if (dynamic && typeof dynamic === 'object' && !Array.isArray(dynamic)) {
+        for (const value of Object.keys(dynamic)) {
+          const image = amazonImage(value);
+          if (image) return image;
+        }
+      }
+    } catch { /* Ignore malformed optional image metadata. */ }
   }
   return null;
 }
@@ -165,8 +174,27 @@ export function createProductPreview(deps: Dependencies = dependencies) {
         controller.signal.throwIfAborted();
         if (!addresses.length || addresses.some(a => !isPublicAddress(a.address))) return null;
         const response = await deps.read(url, addresses[0], HTML_LIMIT, controller.signal);
-        if (![301,302,303,307,308].includes(response.status) || typeof response.headers.location !== 'string') return null;
-        url = httpsUrl(response.headers.location, url);
+        if (response.body.length > HTML_LIMIT) return null;
+        if ([301,302,303,307,308].includes(response.status) && typeof response.headers.location === 'string') {
+          url = httpsUrl(response.headers.location, url);
+          continue;
+        }
+        // Some source redirects return a small HTML interstitial rather than HTTP Location.
+        if (response.status !== 200 || !['vertexaisearch.cloud.google.com', 'www.google.com', 'google.com'].includes(host)
+            || !/^text\/html(?:;|$)/i.test(String(response.headers['content-type']))) return null;
+        const destinations = new Set<string>();
+        for (const tag of response.body.toString('utf8').match(/<(?:a|meta)\b[^>]*>/gi) ?? []) {
+          const attributes: Record<string, string> = {};
+          for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) attributes[match[1].toLowerCase()] = decodeHtml(match[2] ?? match[3] ?? match[4]);
+          const target = /^<a\b/i.test(tag) ? attributes.href
+            : attributes['http-equiv']?.toLowerCase() === 'refresh' ? attributes.content?.match(/^\s*\d+(?:\.\d+)?\s*;\s*url\s*=\s*["']?(.*?)["']?\s*$/i)?.[1] : undefined;
+          if (!target) continue;
+          try {
+            const destination = httpsUrl(target, url);
+            if (amazonHost(destination) && /\/(?:dp|gp\/product)\/[A-Z0-9]{10}(?:[/?]|$)/i.test(destination.pathname)) destinations.add(destination.href);
+          } catch { /* Ignore unsupported destinations. */ }
+        }
+        return destinations.size === 1 ? destinations.values().next().value! : null;
       }
       return null;
     })().catch(() => null);
@@ -189,6 +217,10 @@ export function createProductPreview(deps: Dependencies = dependencies) {
       return { ...product, imageUrl: null, recommendationReason: product.recommendationReason + ' 商品ページへの接続は未確認です。出典で確認してください。' };
     } catch { return null; }
   }
-  return { enrichProduct, fetchProductImage, resolveAmazonProductUrl, prepareProduct };
+  async function fetchResolvedProductImage(value: string): Promise<PreviewImage | null> {
+    const resolved = await resolveAmazonProductUrl(value);
+    return resolved ? fetchProductImage(resolved) : null;
+  }
+  return { enrichProduct, fetchProductImage, resolveAmazonProductUrl, prepareProduct, fetchResolvedProductImage };
 }
-export const { enrichProduct, fetchProductImage, resolveAmazonProductUrl, prepareProduct } = createProductPreview();
+export const { enrichProduct, fetchProductImage, resolveAmazonProductUrl, prepareProduct, fetchResolvedProductImage } = createProductPreview();

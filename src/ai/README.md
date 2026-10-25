@@ -8,7 +8,7 @@
 | ファイル | 役割 |
 | --- | --- |
 | `index.ts` | BE向け公開入口・型のexport |
-| `conversation.ts` | モード分離、検索・提案の制御、予算・価格・状態の検証 |
+| `conversation.ts` | モード分離、検索・提案の制御、価格・状態の検証 |
 | `validation.ts` | 入力検証、交渉結果の参照整合性、未知の属性の除外 |
 | `prompt.ts` | 個別相談と共有情報だけの交渉コンテキストの構築 |
 | `protocol.ts` | 生成JSONのSchemaと検証 |
@@ -27,7 +27,7 @@ Node.js 24で、プロジェクトルートから従来と同じコマンドを�
 node --env-file=.env src/ai/conversation.ts
 ```
 
-.envのキーでGeminiを呼び出し、検索時はAmazonの大中小の価格帯を並列に取得する。`.env`に`GEMINI_API_KEY`を設定する。
+.envのキーでGeminiを呼び出し、検索時はAmazonを価格制限なしで検索し、異なる3商品を優先する。`.env`に`GEMINI_API_KEY`を設定する。
 通常会話・商品選定の既定モデルは`gemini-3.8-flash`。商品選定は短い思考設定を使い、希望の全条件一致を要求せず妥協点を明記する。Amazon以外の商品は候補に含めない。
 検索と商品選定の共通上限は30秒。Amazon取得は各8秒、商品選定のSDK設定は10秒。SDKの自動再試行は無効。
 この時間は処理を無期限に待たせないための技術上の初期設定であり、会話や課題の期限とは別のもの。
@@ -57,7 +57,7 @@ import時にはAPI通信もデモ実行も行わず、APIキーは実際の生�
 | `history` | 本人だけの`ChatMessage[]`。今回の発言を含めない。交渉では渡さない |
 | `profile` | 本人の`AIUserProfile`または`null`。交渉では渡さない |
 | `sharedConditions` | 有効な共有許可のある`SharedCondition[]`。空なら`[]` |
-| `constraints` | 共有範囲を検証済みの予算上限・必須条件・除外条件 |
+| `constraints` | 共有範囲を検証済みの希望条件・除外条件 |
 | `products` / `selectedProductId` | 今回の共有先に公開できる商品候補と選択ID。未選択は`null` |
 | `currentProposal` | 今回の共有先に公開できる正式な提案、または`null` |
 | `negotiationResult` | BEが確定し共有範囲を検証済みの交渉結果、または`null` |
@@ -108,7 +108,7 @@ BEは本人の操作結果を保存し、許可範囲を再選別して次回の
 - `PROPOSAL`：選択商品の提案文・購入条件・相手宛ての下書き。
 - `NEGOTIATION`：修正下書き、または相談だけなら`proposalDraft: null`。
 
-予算超過、価格不明・古い価格、未選択、必須条件の適合不明では下書きを止める。`agreed`・`superseded`の提案は改訂しない。検索が候補0件でも`search`の出典表示データは保持する。表示価格は参考価格で購入時価格の保証ではない。
+価格不明・古い価格、未選択、必須条件の適合不明では下書きを止める。`agreed`・`superseded`の提案は改訂しない。検索が候補0件でも`search`の出典表示データは保持する。表示価格は参考価格で購入時価格の保証ではない。
 
 ## 検証
 

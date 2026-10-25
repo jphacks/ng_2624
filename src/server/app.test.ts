@@ -26,7 +26,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  insert into public.users(id,display_name,role,onboarding_completed,birth_date) values('${parent}','親','parent',true,'1980-01-01'),('${child}','子','child',true,'2017-01-01'),('${stranger}','別の親','parent',true,'1980-01-01');
  insert into public.families(id,name,created_by) values('${family}','家族','${parent}');
  insert into public.family_members(family_id,user_id,family_role) values('${family}','${parent}','parent'),('${family}','${child}','child');
- insert into public.child_settings(child_id,parent_id,reward_guidelines,constraints) values('${child}','${parent}','{"smallJpy":100,"mediumJpy":1000,"largeJpy":10000}','{"mustHave":[],"mustAvoid":[]}');
+ insert into public.child_settings(child_id,parent_id,constraints) values('${child}','${parent}','{"mustHave":[],"mustAvoid":[]}');
  insert into public.app_sessions(token_hash,user_id,csrf_token,expires_at,reauthenticated_at) values('${hash(tokenParent)}','${parent}','csrf',now()+interval '7 days',now()),('${hash(tokenChild)}','${child}','csrf',now()+interval '30 days',null),('${hash(tokenStranger)}','${stranger}','csrf',now()+interval '7 days',now());
  set role service_role;`);
  await db.update('child_settings',{child_id:'eq.'+child},{chore_preferences:['皿洗い']});
@@ -79,19 +79,27 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  await t.test('an agreed proposal cannot create a new private revision conversation',async()=>{
   const c=await call('/conversations','POST',{proposalId:proposal},'parent');assert.equal(c.status,403);assert.equal(c.error.code,'FORBIDDEN');
  });
+ await t.test('予算の保存列と設定レスポンスを廃止し購入条件だけを保存する',async()=>{
+  const columns=await pg.query(`select table_name,column_name from information_schema.columns where table_schema='public' and ((table_name='child_settings' and column_name='reward_guidelines') or (table_name='user_preferences' and column_name in ('budget_small','budget_medium','budget_large')))`);
+  assert.equal(columns.rows.length,0);
+  const settings=await call('/children/'+child+'/settings','GET',undefined,'parent');
+  assert.equal('rewardGuidelines' in settings.data,false);
+  const saved=await call('/children/'+child+'/settings','PATCH',{constraints:{mustHave:['丈夫'],mustAvoid:[]}},'parent');
+  assert.equal(saved.status,200);assert.deepEqual(saved.data.constraints,{mustHave:['丈夫'],mustAvoid:[]});
+ });
  await t.test('invalid child settings fail before creating an auth account',async()=>{
-  const result=await call('/children','POST',{displayName:'新しい子',birthDate:'2018-04-01',rewardGuidelines:{smallJpy:1000,mediumJpy:100,largeJpy:10000}},'parent');
-  assert.equal(result.status,400);assert.match(result.error.message,/小・中・大/);
+  const result=await call('/children','POST',{displayName:'新しい子',birthDate:'2018-04-01',chorePreferences:'invalid'},'parent');
+  assert.equal(result.status,400);assert.equal(result.error.code,'INVALID_INPUT');
  });
  await t.test('child registration reports partial settings failure without inviting duplicate registration',async()=>{
   const newChild=id(99);
   await pg.exec(`reset role; insert into auth.users(id) values('${newChild}'); set role service_role;`);
   const partialDB={...db,auth:async()=>({id:newChild}),insert:async(...args:Parameters<typeof db.insert>)=>{if(args[0]==='child_settings')throw Error('temporary settings failure');return db.insert(...args);}};
   const partialApp=createApp(config,{db:partialDB,ai:async()=>{throw Error('unused');},enrich:async p=>p,image:async()=>null,qr:async()=>''});
-  const response=await partialApp(new Request(config.origin+'/api/children',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','content-type':'application/json'},body:JSON.stringify({displayName:'新しい子',birthDate:'2018-04-01',rewardGuidelines:{smallJpy:100,mediumJpy:1000,largeJpy:10000}})}));
+  const response=await partialApp(new Request(config.origin+'/api/children',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','content-type':'application/json'},body:JSON.stringify({displayName:'新しい子',birthDate:'2018-04-01',chorePreferences:['皿洗い']})}));
   const payload=await response.json();const data=payload.data;assert.equal(response.status,201,JSON.stringify(payload));assert.equal(data.childId,newChild);assert.equal(data.settingsSaved,false);
   assert.equal((await db.list('users',{id:'eq.'+newChild})).length,1);
-  const recovered=await call('/children/'+newChild+'/settings','PATCH',{rewardGuidelines:{smallJpy:100,mediumJpy:1000,largeJpy:10000}},'parent');assert.equal(recovered.status,200);
+  const recovered=await call('/children/'+newChild+'/settings','PATCH',{chorePreferences:['皿洗い']},'parent');assert.equal(recovered.status,200);
  });
  await t.test('explicit search endpoint carries a query and target child context without private child preferences',async()=>{
   let captured:any;

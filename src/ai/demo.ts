@@ -8,7 +8,6 @@ export const demoInput: AIInput = {
     profile: { age: 10, gender: null, preferences: { interests: ['ロボット工作'], wishes: [], expectations: [] } },
     sharedConditions: [],
     constraints: { mustHave: ['小学生向け'], mustAvoid: [] },
-    rewardGuidelines: { smallJpy: 1000, mediumJpy: 3000, largeJpy: 10000 },
     products: [], selectedProductId: null, currentProposal: null, negotiationResult: null,
 };
 
