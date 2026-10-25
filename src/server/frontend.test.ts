@@ -6,7 +6,8 @@ import { readFile } from 'node:fs/promises';
 // Execute the shipped script with a small DOM boundary. No application-only test hooks.
 const source=await readFile(new URL('../../frontend/app.js',import.meta.url),'utf8');
 async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>,confirm=(_message:string)=>true){
- const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools','#role-label'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
+ const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools','#role-label','#pairing-dialog','#pairing-error'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
+ const dialog=nodes['#pairing-dialog'];dialog.open=false;dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;};dialog.addEventListener=()=>{};
  const classes=new Set<string>();
  nodes['#content'].classList={add:(...names:string[])=>names.forEach(name=>classes.add(name)),remove:(...names:string[])=>names.forEach(name=>classes.delete(name)),contains:(name:string)=>classes.has(name)};
  const location={hash:'#home',search:'',pathname:'/'};
@@ -14,7 +15,7 @@ async function frontend(request:(path:string,method?:string,body?:any)=>Promise<
  const context=vm.createContext({window,document:{querySelector:(id:string)=>nodes[id],addEventListener:(name:string,fn:any)=>{events[name]=fn;}},location,
  history:{pushState:(_:unknown,__:string,hash:string)=>{location.hash=hash;},replaceState:(_:unknown,__:string,hash:string)=>{location.hash=hash;}},
  sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm});
- vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat};})();'),context);
+ vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat,checkPairingRequests};})();'),context);
  await new Promise(resolve=>setImmediate(resolve));
  return {...window.testing,nodes,events,location,window};
 }
@@ -502,4 +503,58 @@ test('parent response starts discussion only on revision and final decline stays
  assert.match(ui.nodes['#content'].innerHTML,/今回は見送り/);
  assert.match(ui.nodes['#content'].innerHTML,/今回は購入しません/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="consult-proposal"/);
+});
+
+const pairingRequest={pairingRequestId:'pair-1',childId:'child',childDisplayName:'こども',confirmationCode:'123456',status:'pending',expiresAt:new Date(Date.now()+600000).toISOString()};
+test('incoming pairing opens a number entry dialog without navigating and preserves input across polls',async()=>{
+ let pending=false;const writes:any[]=[];
+ const ui=await frontend(async(path,method,body)=>{
+  if(path==='/pairing/requests')return {requests:pending?[pairingRequest]:[]};
+  if(path.endsWith('/responses')){writes.push(body);pending=false;return {status:'approved'};}
+  return basic(path);
+ });
+ const content=ui.nodes['#content'].innerHTML;
+ pending=true;await ui.checkPairingRequests();
+ const dialog=ui.nodes['#pairing-dialog'];
+ assert.equal(dialog.open,true);assert.match(dialog.innerHTML,/6桁の確認番号/);
+ assert.doesNotMatch(dialog.innerHTML,/123456/);
+ dialog.innerHTML+='entered-input';await ui.checkPairingRequests();assert.match(dialog.innerHTML,/entered-input/);
+ assert.equal(ui.nodes['#content'].innerHTML,content);assert.equal(ui.location.hash,'#home');
+ await ui.submit('pair-respond-modal','pair-1',{confirmationCode:'123456'});
+ assert.deepEqual(writes.map(x=>({...x})),[{decision:'approved',confirmationCode:'123456'}]);
+ assert.equal(dialog.open,false);assert.match(ui.nodes['#notice'].textContent,/承認しました/);
+});
+test('pairing failure stays in the dialog and later defers only that request',async()=>{
+ let requests=[pairingRequest];
+ const ui=await frontend(async(path,method)=>{
+  if(path==='/pairing/requests')return {requests};
+  if(method==='POST')throw new Error('確認番号が違います。');
+  return basic(path);
+ });
+ const source={matches:()=>false,disabled:false,closest:()=>true};
+ await ui.run(()=>ui.submit('pair-respond-modal','pair-1',{confirmationCode:'654321'}),source);
+ assert.equal(ui.nodes['#pairing-dialog'].open,true);
+ assert.match(ui.nodes['#pairing-error'].textContent,/確認番号が違います/);
+ await ui.action('pairing-later');await ui.checkPairingRequests();
+ assert.equal(ui.nodes['#pairing-dialog'].open,false);
+ requests=[{...pairingRequest,pairingRequestId:'pair-2'}];await ui.checkPairingRequests();
+ assert.equal(ui.nodes['#pairing-dialog'].open,true);assert.match(ui.nodes['#pairing-dialog'].innerHTML,/pair-2/);
+ requests=[];await ui.checkPairingRequests();assert.equal(ui.nodes['#pairing-dialog'].open,false);
+});
+test('pairing rejection sends no confirmation code and child sessions never poll parent requests',async()=>{
+ const writes:any[]=[];
+ const ui=await frontend(async(path,method,body)=>{
+  if(path==='/pairing/requests')return {requests:[pairingRequest]};
+  if(method==='POST'){writes.push(body);return {status:'rejected'};}
+  return basic(path);
+ });
+ await ui.action('pairing-reject','pair-1');
+ assert.deepEqual(writes.map(x=>({...x})),[{decision:'rejected'}]);assert.equal(ui.nodes['#pairing-dialog'].open,false);
+ let polls=0;
+ const child=await frontend(async path=>{
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path==='/pairing/requests')polls++;
+  return basic(path);
+ });
+ await child.checkPairingRequests();assert.equal(polls,0);assert.equal(child.nodes['#pairing-dialog'].open,false);
 });
