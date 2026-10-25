@@ -923,14 +923,6 @@ h1[tabindex="-1"]:focus { outline: none; }
 .talk-header { gap: 8px; }
 .points-chip { border-radius: 999px; padding: 5px 14px; font-size: 12px; }
 .privacy-label { font-size: 10px; }
-.chat-intro { display: flex; align-items: center; gap: 9px; padding-bottom: 8px; border-bottom: 1px solid #edf2f4; }
-.chat-intro .dove { flex: none; width: 52px; height: 52px; border: 1px solid #b6ddbc; border-radius: 50%; }
-.chat-intro h1 { margin: 0; font-size: 17px; }
-.chat-intro p { margin: 0; font-size: 10px; color: var(--text-sub); }
-.chat-intro .section-link { margin-left: auto; font-size: 10px; padding: 4px 8px; }
-.chat-intro-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.chat-intro .new-chat-btn { margin: 0; flex: none; width: auto; min-height: 36px; font-size: 12px; padding: 6px 12px; white-space: nowrap; }
-.chat-intro .delete-chat-btn { background: #fdecec; color: #b42318; }
 .messages { gap: 23px; padding: 8px 0; scrollbar-width: thin; scrollbar-color: #d4e5ec transparent; }
 .msg { max-width: 96%; gap: 9px; }
 .msg-body { min-width: 0; }
@@ -1053,8 +1045,7 @@ h1[tabindex="-1"]:focus { outline: none; }
   gap: 8px;
 }
 
-.chat-layout-fixed-v2 .chat-switcher,
-.chat-layout-fixed-v2 .chat-intro {
+.chat-layout-fixed-v2 .chat-switcher {
   flex-shrink: 0;
 }
 
@@ -1112,10 +1103,19 @@ body:has(#content.chat-layout-v3) {
   overflow: hidden;
 }
 
-.app:has(#content.chat-layout-v3) .brand-header,
 .app:has(#content.chat-layout-v3) #navigation,
 .app:has(#content.chat-layout-v3) #notice {
   flex-shrink: 0;
+}
+
+/* チャット中はタイトルを隠し、会話を広く表示する。
+   上の余白は、左上の「〇〇の画面」ラベルと右上の「デモ操作」に重ならないため。 */
+.app:has(#content.chat-layout-v3) .brand-header {
+  display: none;
+}
+
+.app:has(#content.chat-layout-v3) {
+  padding-top: 36px;
 }
 
 /* チャット本体 */
@@ -1128,11 +1128,6 @@ body:has(#content.chat-layout-v3) {
   flex-direction: column;
   gap: 8px;
   padding: 8px 20px 12px;
-}
-
-/* 上部のタイトルは固定 */
-.chat-layout-v3 .chat-intro {
-  flex-shrink: 0;
 }
 
 /* チャット履歴だけスクロール */
@@ -1163,15 +1158,47 @@ body:has(#content.chat-layout-v3) {
   background: #fff;
 }
 
-/* 商品検索ボタン */
-.chat-layout-v3 .chat-fixed-footer > .btn-pill {
-  align-self: stretch;
-  width: 100%;
+/* 商品検索（左）と新しいチャット（右）を半分ずつ横並びに。
+   検索ボタンが出ないときも、新しいチャットは同じ右側に残す。 */
+.chat-layout-v3 .chat-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chat-layout-v3 .chat-actions .btn-pill {
+  flex: 0 1 calc(50% - 4px);
+  min-width: 0;
   min-height: 42px;
+  margin: 0;
+  padding: 6px 10px;
   border-radius: 999px;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.chat-layout-v3 .chat-actions [data-action="search-product-now"] {
   background: #e9f7ff;
   color: #0069b8;
+}
+
+.chat-layout-v3 .chat-actions .new-chat-btn {
+  border: 1.5px solid #b8d6e4;
+  background: #fff;
+  color: #256a8b;
+}
+
+/* 送信できないときの案内は、下部で場所を取りすぎないよう小さめに */
+.chat-layout-v3 .chat-fixed-footer .empty-note {
+  margin: 0;
+  padding: 12px 16px;
   font-size: 13px;
+  line-height: 1.7;
+}
+
+.chat-layout-v3 .chat-fixed-footer .empty-note:empty {
+  display: none;
 }
 
 /* 入力欄と送信ボタンを横並びに */
@@ -1212,6 +1239,11 @@ body:has(#content.chat-layout-v3) {
   background: transparent;
   font-size: 16px;
   line-height: 22px;
+}
+
+.chat-layout-v3 form[data-form="message"] textarea::placeholder {
+  color: #94aab3;
+  font-weight: 400;
 }
 
 /* 送信ボタンを右側の丸い矢印に */
