@@ -53,7 +53,7 @@ const noChild=d=>parent()&&!d.childId?empty('子ども一覧から子どもを�
 // Home shows only the points and the wish list.
 async function home(){
  const d=await dashboard();
- render(`<h1 class="page-title">${esc(parent()?childName(d):state.session.user.displayName)}${parent()?'の目標・お手伝い':'、おかえり！'}</h1>${parent()?selector(d.children):''}${noChild(d)}<div class="points-oval"><span class="points-label">ありがとうポイント</span><span class="points-value">${num(d.balanceYen)}<small>pt</small></span></div><p class="pace">${kid('1ポイント＝1円 ・これまで ','1ポイント＝1えん ・これまでに もらった：')}${points(d.lifetimeEarnedYen)}${parent()?`<br>最近の週平均：${points(d.weeklyPaceYen)}`:''}</p><section class="goals"><h2>${parent()?'子どもの目標':'ほしいもの'}</h2>${goals(d)}</section>${reloadBtn()}`);
+ render(`<h1 class="page-title">${esc(parent()?childName(d):state.session.user.displayName)}${parent()?'の目標・お手伝い':'、おかえり！'}</h1>${parent()?selector(d.children):''}${noChild(d)}<div class="points-oval"><span class="points-label">ありがとうポイント</span><span class="points-value">${num(d.balanceYen)}<small>pt</small></span></div><p class="pace">${kid('1ポイント＝1円 ・これまで ','1ポイント＝1えん ・これまでに もらった：')}${points(d.lifetimeEarnedYen)}${parent()?`<br>最近の週平均：${points(d.weeklyPaceYen)}`:''}</p><section class="goals"><h2>${parent()?'子どもの目標':'ほしいもの'}</h2>${goals(d)}</section><a class="btn-pill login-link" href="#chores">${kid('お手伝いを確認する','おてつだいを みる')}</a>${reloadBtn()}`);
 }
 // Chores, chore requests and product proposals live on their own screen.
 async function chores(){
