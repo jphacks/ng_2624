@@ -87,11 +87,15 @@ test('a successful mutation after navigation reports completion without replacin
 
 test('composer follows server phase and introduction stays before all conversation messages',async()=>{
  const thread:any={conversationId:'chat',mode:'consultation',phase:'not_started',canMessage:false,messages:[{sender:'assistant',content:'以前の返答'}],products:[]};
- const ui=await frontend(async path=>path==='/conversations/chat'?thread:basic(path));
+ const starts:string[]=[];
+ const ui=await frontend(async path=>{
+  if(path==='/conversations/chat/start'){starts.push(path);thread.phase='consultation';thread.canMessage=true;return thread;}
+  return path==='/conversations/chat'?thread:basic(path);
+ });
  await ui.chat('chat');let html=ui.nodes['#content'].innerHTML;
- assert.doesNotMatch(html,/data-form="message"/);assert.match(html,/個別相談を開始する/);
+ assert.match(html,/data-form="message"/);assert.equal(starts.length,1);
  assert.ok(html.indexOf('ぽぽです。')<html.indexOf('以前の返答'));assert.match(html,/message-avatar/);
- thread.phase='consultation';thread.canMessage=true;await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
+ await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);assert.equal(starts.length,1);
  for(const phase of ['awaiting_response','closed']){thread.phase=phase;thread.canMessage=false;await ui.chat('chat');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"|data-form="search-products"/);}
 });
 
@@ -170,6 +174,8 @@ test('demo tools do not change navigation or welcome layout',async()=>{
   assert.equal(demo.nodes['#demo-tools'].hidden,false);
   assert.equal(regular.nodes['#demo-tools'].hidden,true);
   assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/デモ操作/);
+  assert.equal([...demo.nodes['#navigation'].innerHTML.matchAll(/<a href=/g)].length,3);
+  assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/href="#chores"/);
  }
 });
 
@@ -275,7 +281,7 @@ test('small screen label follows the signed-in role, including child details and
  assert.equal(ui.nodes['#role-label'].textContent,'');
 });
 
-test('unified chat retains child, personal and shared thread switching without starting on entry',async()=>{
+test('unified chat starts the personal thread and retains child buttons and shared chat routing',async()=>{
  const calls:string[]=[];
  const thread={conversationId:'latest',mode:'consultation',phase:'not_started',canMessage:false,messages:[],products:[]};
  const ui=await frontend(async(path,method)=>{
@@ -291,22 +297,21 @@ test('unified chat retains child, personal and shared thread switching without s
  await ui.go('#conversations');
  const html=ui.nodes['#content'].innerHTML;
  assert.equal(ui.state.chat.conversationId,'latest');
- assert.match(html,/id="child-selector"/);assert.match(html,/一人目/);assert.match(html,/二人目/);
- assert.match(html,/data-action="new-chat"/);assert.match(html,/data-id="old"/);assert.match(html,/data-id="shared"/);
- assert.doesNotMatch(html,/data-id="other-shared"|data-form="message"/);
- assert.ok(!calls.some(call=>call.startsWith('POST ')));
+ assert.match(html,/class="chat-child-toggle"/);assert.match(html,/data-action="select-chat-child"/);assert.match(html,/一人目/);assert.match(html,/二人目/);
+ assert.match(html,/data-action="new-chat"/);assert.match(html,/data-id="child" aria-pressed="true"/);
+ assert.doesNotMatch(html,/data-id="other-shared"/);assert.match(html,/data-form="message"/);
+ assert.deepEqual(calls.filter(call=>call.startsWith('POST ')),['POST /conversations/latest/start']);
  assert.equal(ui.nodes['#content'].classList.contains('chat-layout-v3'),true);
- await ui.action('start-chat');assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
+ assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
  await ui.action('open-chat','old');assert.equal(ui.location.hash,'#conversation/old');
  await ui.action('open-negotiation','shared');assert.equal(ui.location.hash,'#negotiation/shared');
  assert.match(ui.nodes['#content'].innerHTML,/親子に公開するメッセージ/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="search-product-now"/);
- ui.events.change({target:{id:'child-selector',value:'other'}});
- await new Promise(resolve=>setImmediate(resolve));
+ await ui.action('select-chat-child','other');
  assert.equal(ui.location.hash,'#conversations');
  assert.equal(ui.state.childId,'other');
  assert.ok(calls.includes('GET /conversations?childId=other'));
- assert.match(ui.nodes['#content'].innerHTML,/data-id="other-shared"/);
+ assert.match(ui.nodes['#content'].innerHTML,/data-id="other" aria-pressed="true"/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-id="shared"/);
  await ui.go('#home');assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
  assert.equal(ui.nodes['#content'].classList.contains('chat-layout-v3'),false);
@@ -326,11 +331,11 @@ test('new unified chat uses existing create, start and product search endpoints'
   return basic(path);
  });
  await ui.go('#conversations');
- assert.equal(JSON.stringify(posts),JSON.stringify([{path:'/conversations',body:{}}]));
- assert.match(ui.nodes['#content'].innerHTML,/個別相談を開始する/);
- await ui.action('start-chat');await ui.action('search-product-now');
+ assert.equal(JSON.stringify(posts),JSON.stringify([{path:'/conversations',body:{}},{path:'/conversations/new/start',body:{}}]));
+ assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
+ await ui.action('search-product-now');
  assert.equal(posts.at(-1)?.path,'/conversations/new/search');
- assert.match(posts.at(-1)?.body.query,/これまでのチャット/);
+ assert.equal(posts.at(-1)?.body.fromConversation,true);assert.equal(posts.at(-1)?.body.query,undefined);
  assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="search-products"/);
 });

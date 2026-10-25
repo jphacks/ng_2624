@@ -31,7 +31,7 @@ const state={session:null,childId:null,dashboard:null,chat:null,proposal:null,bu
 const parent=()=>state.session?.user?.role==='parent';
 function notice(text='',error=false){$('#notice').textContent=text;$('#notice').className=error?'global-notice form-error':'global-notice';}
 function render(html){state.dirty=false;$('#content').classList?.remove('chat-layout-fixed-v2','chat-layout-v3');$('#content').innerHTML=html;$('#content').setAttribute('aria-busy','false');}
-function nav(){ const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=navLink('#home','home','ホーム')+navLink('#chores','hand',kid('お手伝い','おてつだい'))+navLink('#conversations','chat',kid('ぽぽに相談','ぽぽにそうだん'))+navLink('#settings','gear',parent()?'設定':'じぶんの設定'); }
+function nav(){ const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=navLink('#home','home','ホーム')+navLink('#conversations','chat',kid('ぽぽに相談','ぽぽにそうだん'))+navLink('#settings','gear',parent()?'設定':'じぶんの設定'); }
 // Line icons for the bottom bar: house, hand, speech bubble, gear.
 const navIcons={
  home:'<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -211,7 +211,7 @@ async function action(a,id){
  if(a==='search-product-now'){
   notice('これまでの会話から商品を探しています…');
   return renderChat(await api(chatPath()+'/search','POST',{
-    query:'これまでのチャットで相談した商品名・用途・予算・希望条件を踏まえ、購入候補を提案してください。名前や家庭の個人的な事情は検索条件に含めないでください。'
+    fromConversation:true
   }));
 }
  if(a==='select-product')return renderChat(await api(chatPath()+'/selected-product','PATCH',{selectedProductId:id}));

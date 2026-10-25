@@ -10,6 +10,8 @@ import { generateGeminiReply, readGrounding } from './gemini.ts';
 import type { GenerationResult } from './gemini.ts';
 import type { ConversationRequest } from './prompt.ts';
 import { publicUrl } from './validation.ts';
+import { searchProducts, SEARCH_BUDGET_MS } from './search.ts';
+import { parseAmazonResults, searchAmazon } from './amazon.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const NOW = '2026-10-23T20:00:00+09:00';
@@ -55,10 +57,14 @@ function extraction(overrides: Record<string, unknown> = {}): GenerationResult {
 }
 function searchQueue(results: GenerationResult[], requests: ConversationRequest[] = []) {
     let count = 0;
+    let searchResult: GenerationResult | undefined;
     return async (request: ConversationRequest): Promise<GenerationResult> => {
         requests.push(request);
+        if (request.search && searchResult) return searchResult;
         assert.ok(count < results.length, 'unexpected extra API call');
-        return results[count++];
+        const result = results[count++];
+        if (request.search) searchResult = result;
+        return result;
     };
 }
 const SEARCH = () => decision({ action: 'SEARCH', searchQuery: '小学生 ロボット工作キット 大中小の目安に合う価格' });
@@ -104,9 +110,63 @@ test('実商品検索は判断→検索→整形の順に進み、出典のURL�
     assert.equal(output.products[0].priceJpy, 2980);
     assert.equal(output.products[0].priceCheckedAt, NOW);
     assert.equal(output.search?.searchSuggestionsHtml, '<div>Google検索候補</div>');
-    assert.deepEqual(requests.map(r => !!r.search), [false, true, false]);
+    assert.deepEqual(requests.map(r => !!r.search), [false, true, true, true, false]);
     assert.equal(requests[1].input.includes('工作に取り組んでほしい'), false);
-    assert.equal(requests[2].input.includes('history'), false);
+    assert.equal(requests[4].input.includes('history'), false);
+    assert.match(requests[1].systemInstruction, /今回の担当は小のみ/);
+    assert.match(requests[4].systemInstruction, /最大3件。大中小各1件/);
+    assert.match(requests[1].systemInstruction, /希望の全条件一致は不要/);
+    assert.match(requests[4].systemInstruction, /未達・未確認だけを理由に候補を一律除外しない/);
+    assert.match(requests[4].systemInstruction, /妥協点として明記/);
+    assert.deepEqual(requests.slice(1, 4).map(r => JSON.parse(r.input).targetSize), ['small', 'medium', 'large']);
+    for (const request of requests.slice(1)) {
+        const payload = JSON.parse(request.input);
+        assert.deepEqual(payload.preferredFeatures, input().constraints.mustHave);
+        assert.equal('mustHave' in payload, false);
+        assert.equal('constraints' in payload, false);
+    }
+    assert.equal((requests[4].schema?.properties as Record<string, { maxItems: number }>).products.maxItems, 3);
+    assert.deepEqual(requests.slice(1).map(r => r.timeoutMs), [20_000, 20_000, 20_000, 10_000]);
+    assert.deepEqual(requests.slice(1).map(r => r.maxOutputTokens), [4096, 4096, 4096, 4096]);
+});
+
+test('商品検索は共通の期限で通信を中断し、遅れて届いた結果から整形を始めない', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const requests: ConversationRequest[] = [];
+    let resolveSearch!: (value: GenerationResult) => void;
+    const result = searchProducts('工作キット', { ...input(), rewardGuidelines: { smallJpy: null, mediumJpy: 3000, largeJpy: null } }, async request => {
+        requests.push(request);
+        return new Promise<GenerationResult>(resolve => { resolveSearch = resolve; });
+    }, () => 'id');
+    const rejected = assert.rejects(result, hasCode('TIMEOUT'));
+    t.mock.timers.tick(SEARCH_BUDGET_MS);
+    await rejected;
+    assert.equal(requests[0].signal?.aborted, true);
+    resolveSearch(grounded());
+    await Promise.resolve();
+    assert.equal(requests.length, 1);
+});
+
+test('検索から整形へ進んでも30秒の期限を延長しない', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const requests: ConversationRequest[] = [];
+    let resolveSearch!: (value: GenerationResult) => void;
+    let enteredExtraction!: () => void;
+    const extractionStarted = new Promise<void>(resolve => { enteredExtraction = resolve; });
+    const result = searchProducts('工作キット', { ...input(), rewardGuidelines: { smallJpy: null, mediumJpy: 3000, largeJpy: null } }, async request => {
+        requests.push(request);
+        if (request.search) return new Promise<GenerationResult>(resolve => { resolveSearch = resolve; });
+        enteredExtraction();
+        return new Promise<GenerationResult>(() => {});
+    }, () => 'id');
+    const rejected = assert.rejects(result, hasCode('TIMEOUT'));
+    t.mock.timers.tick(20_000);
+    resolveSearch(grounded());
+    await extractionStarted;
+    assert.equal(requests.length, 2);
+    t.mock.timers.tick(10_000);
+    await rejected;
+    assert.equal(requests[1].signal?.aborted, true);
 });
 
 const rejectedCases: Array<[string, Record<string, unknown>, GenerationResult]> = [
@@ -135,7 +195,7 @@ test('検索に出典がなければ整形APIを呼ばずに聞き取りへ戻�
     const requests: ConversationRequest[] = [];
     const result = await createReply(input(), { generate: searchQueue([SEARCH(), { text: '候補なし', search: null, evidence: {} }], requests) });
     assert.equal(result.action, 'HEARING');
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 4);
 });
 
 test('目安未設定では検索APIを呼ばず設定を案内する', async () => {
@@ -295,16 +355,12 @@ test('従来の直接起動を維持し、キーなしなら安全なエラー�
 
 test('実SDKが固定指示・JSON Schema・検索ツール・store=falseを正しいAPI形式で送る', async () => {
     const original = globalThis.fetch;
-    const originalTimeout = AbortSignal.timeout;
-    const timeouts: number[] = [];
-    AbortSignal.timeout = milliseconds => {
-        timeouts.push(milliseconds);
-        return originalTimeout(milliseconds);
-    };
     const bodies: Array<Record<string, unknown>> = [];
+    const signals: AbortSignal[] = [];
     globalThis.fetch = async (_url, init) => {
         const body = init?.body ?? (_url instanceof Request ? await _url.clone().text() : '');
         bodies.push(JSON.parse(String(body)) as Record<string, unknown>);
+        signals.push((_url instanceof Request ? _url.signal : init?.signal)!);
         return new Response(JSON.stringify({ id: 'sdk-test', status: 'completed',
             steps: [{ type: 'model_output', content: [{ type: 'text', text: '{"ok":true}' }] }],
         }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -312,17 +368,22 @@ test('実SDKが固定指示・JSON Schema・検索ツール・store=falseを正�
     try {
         const result = await generateGeminiReply({ systemInstruction: '固定の指示', input: '{}', schema: { type: 'object' } }, 'fake-key-for-test');
         assert.equal(result.text, '{"ok":true}');
-        assert.equal(bodies[0].model, 'gemini-4-argon');
+        assert.equal(bodies[0].model, 'gemini-3.8-flash');
         assert.equal(bodies[0].store, false);
         assert.equal(bodies[0].system_instruction, '固定の指示');
         assert.deepEqual(bodies[0].response_format, { type: 'text', mime_type: 'application/json', schema: { type: 'object' } });
         assert.equal('tools' in bodies[0], false);
-        await generateGeminiReply({ systemInstruction: '検索指示', input: '{}', search: true }, 'fake-key-for-test');
-        assert.equal(bodies[1].model, 'gemini-3.8-flash');
+        const controller = new AbortController();
+        await generateGeminiReply({ systemInstruction: '検索指示', input: '{}', search: true,
+            maxOutputTokens: 4096, timeoutMs: 20_000, signal: controller.signal }, 'fake-key-for-test');
         assert.deepEqual(bodies[1].tools, [{ type: 'google_search' }]);
         assert.equal('response_format' in bodies[1], false);
-        assert.deepEqual(timeouts, [30_000, 60_000]);
-    } finally { globalThis.fetch = original; AbortSignal.timeout = originalTimeout; }
+        assert.deepEqual(bodies[1].generation_config, { max_output_tokens: 4096, thinking_level: 'low' });
+        assert.equal(bodies[1].model, 'gemini-3.8-flash');
+        assert.equal('generation_config' in bodies[0], false);
+        controller.abort();
+        assert.equal(signals[1].aborted, true);
+    } finally { globalThis.fetch = original; }
 });
 
 test('実SDKの429を再試行せず安全なエラーへ変換する', async () => {
@@ -430,7 +491,7 @@ for (const role of ['parent', 'child'] as const) {
         }
         assert.equal(JSON.parse(requests[0].input).sharedConditions[0].content, value.sharedConditions[0].content);
         assert.equal(requests[0].input.includes('child-1'), false);
-        assert.equal(requests.length, 5);
+        assert.equal(requests.length, 7);
     });
 }
 
@@ -527,7 +588,7 @@ test('検索で大中小各1件を返し、そのまま提案へ進める', asyn
     source.search!.sources = [800, 3000, 12000].map((price, index) => ({ id: `s${index}`, title: '販売元', url: `https://www.tamiya.com/product-${index}` }));
     source.evidence = Object.fromEntries([800, 3000, 12000].map((price, index) => [`s${index}`, [`価格は${price}円です。`]]));
     raw.products = [800, 3000, 12000].map((price, index) => ({ ...raw.products[0], name: `商品${index}`, priceJpy: price,
-        priceEvidence: `価格は${price}円です。`, productSourceId: `s${index}`, sourceIds: [`s${index}`] }));
+        priceEvidence: `価格は${price}円です。`, productSourceId: `source-${index + 1}`, sourceIds: [`source-${index + 1}`] }));
     let ids = 0;
     const found = await createReply(input(), { generate: searchQueue([SEARCH(), source, { ...extraction(), text: JSON.stringify(raw) }]), createId: () => `p${++ids}` });
     if (found.action !== 'PRODUCT') return assert.fail('expected products');
@@ -709,7 +770,7 @@ test('explicit product search skips hearing and uses only the supplied public qu
         generate: searchQueue([grounded(), extraction()], requests), createId: () => product.id,
     });
     assert.equal(result.action, 'PRODUCT');
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 4);
     assert.equal(requests[0].search, true);
     const payload = JSON.parse(requests[0].input);
     assert.equal(payload.query, 'Switch スプラトゥーン');
@@ -738,4 +799,71 @@ test('chore terms in a product negotiation remain valid conversation content',as
  let called=false;
  await createReply({...input(),message:'商品の購入条件として洗濯物を干すお手伝いをしたい'},{generate:async()=>{called=true;return decision();}});
  assert.equal(called,true);
+});
+
+function amazonCard(asin: string, name: string, price: string) {
+    return `<div data-asin="${asin}" data-component-type="s-search-result"><h2><span>${name}</span></h2>${price}</div>`;
+}
+const amazonPrice = (price: number) => `<span class="a-price"><span class="a-offscreen">￥${price.toLocaleString('en-US')}</span></span>`;
+
+test('Amazonの同じ検索カードから商品名・ASIN・現在価格を取得し、別カードの価格や参考価格を混ぜない', () => {
+    const html = [
+        amazonCard('B000000001', '青い車 &amp; 動物', amazonPrice(1000) + '<span class="a-price a-text-price"><span class="a-offscreen">￥2,000</span></span>'),
+        amazonCard('B000000002', '価格のない商品', ''),
+        amazonCard('B000000003', '次の商品', amazonPrice(1100)),
+        amazonCard('B000000004', '範囲外', amazonPrice(2000)),
+        amazonCard('B000000005', '参考価格だけ', '<span class="a-price a-text-price"><span class="a-offscreen">￥1,000</span></span>'),
+        amazonCard('B000000001', '重複商品', amazonPrice(1000)),
+    ].join('');
+    const result = parseAmazonResults(html, 800, 1200);
+    assert.deepEqual(result.search?.sources.map(s => s.url), ['https://www.amazon.co.jp/dp/B000000001', 'https://www.amazon.co.jp/dp/B000000003']);
+    assert.equal(result.search?.sources[0].title, '青い車 & 動物');
+    assert.deepEqual(result.evidence['amazon-B000000001'], ['青い車 & 動物。表示価格：￥1,000']);
+    assert.doesNotMatch(result.text, /価格のない商品|範囲外|参考価格だけ|重複商品/);
+});
+
+test('Amazon検索は固定HTTPSホスト・価格帯・リダイレクト禁止・キャンセル信号を使う', async () => {
+    const controller = new AbortController();
+    let sentSignal: AbortSignal | undefined;
+    const result = await searchAmazon({ systemInstruction: '', input: JSON.stringify({ query: '車 & 動物', targetBudget: { minJpy: 800, maxJpy: 1200 } }), signal: controller.signal }, async (url, init) => {
+        const parsed = new URL(String(url));
+        assert.equal(parsed.origin, 'https://www.amazon.co.jp');
+        assert.equal(parsed.pathname, '/s');
+        assert.equal(parsed.searchParams.get('k'), '車 & 動物');
+        assert.equal(parsed.searchParams.get('rh'), 'p_36:80000-120000');
+        assert.equal(init?.redirect, 'error');
+        sentSignal = init?.signal ?? undefined;
+        return new Response(amazonCard('B000000001', '車', amazonPrice(1000)), { headers: { 'content-type': 'text/html' } });
+    });
+    assert.equal(result.search?.sources.length, 1);
+    controller.abort();
+    assert.equal(sentSignal?.aborted, true);
+});
+
+test('Amazonの取得失敗・認証チェック・巨大な応答を商品候補として扱わない', async () => {
+    const request = { systemInstruction: '', input: JSON.stringify({ query: '車', targetBudget: { minJpy: 800, maxJpy: 1200 } }) };
+    for (const response of [
+        new Response('busy', { status: 503 }),
+        new Response('<title>Robot Check</title>', { headers: { 'content-type': 'text/html' } }),
+        new Response(' '.repeat(4 * 1024 * 1024 + 1), { headers: { 'content-type': 'text/html' } }),
+    ]) await assert.rejects(searchAmazon(request, async () => response), hasCode('API_ERROR'));
+});
+
+test('並列検索で同じ出典IDが使われても、URLごとの価格の根拠を混ぜず大中小を返す', async () => {
+    const prices = { small: 1000, medium: 3000, large: 10000 };
+    const found = await searchProducts('ブロック', input(), async request => {
+        const payload = JSON.parse(request.input);
+        assert.deepEqual(Object.values(payload.sourceEvidence), [['価格は1000円です。'], ['価格は3000円です。'], ['価格は10000円です。']]);
+        return { text: JSON.stringify({ products: payload.sources.map((source: { id: string }, index: number) => ({
+            name: `商品${index}`, description: 'ブロック', recommendationReason: '色は未確認です。', productSourceId: source.id, sourceIds: [source.id],
+            priceJpy: Object.values(prices)[index], priceEvidence: `価格は${Object.values(prices)[index]}円です。`,
+        })) }), search: null, evidence: {} };
+    }, () => crypto.randomUUID(), async request => {
+        const size = JSON.parse(request.input).targetSize as keyof typeof prices;
+        const index = Object.keys(prices).indexOf(size);
+        return { text: `商品${index} 価格は${prices[size]}円です。`, search: { queries: [size], searchSuggestionsHtml: null,
+            sources: [{ id: 'same-id', title: `商品${index}`, url: `https://www.amazon.co.jp/dp/B00000000${index}` }] },
+            evidence: { 'same-id': [`価格は${prices[size]}円です。`] } };
+    });
+    assert.deepEqual(found.products.map(p => [p.size, p.priceJpy]), [['small', 1000], ['medium', 3000], ['large', 10000]]);
 });
