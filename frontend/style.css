@@ -1041,3 +1041,18 @@ h1[tabindex="-1"]:focus { outline: none; }
   text-decoration: none;
 }
 .demo-tools[hidden] { display: none; }
+
+.role-label {
+  position: fixed;
+  z-index: 101;
+  top: 8px;
+  left: max(8px, calc((100vw - 540px) / 2 + 8px));
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #edf9f3;
+  color: #54727e;
+  font-size: 11px;
+  line-height: 1.6;
+  pointer-events: none;
+}
+.role-label[hidden] { display: none; }

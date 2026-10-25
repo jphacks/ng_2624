@@ -113,7 +113,10 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   const blocked=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(blocked.status,409);assert.equal(blocked.error.code,'ALREADY_AUTHENTICATED');
   jar=ownJar;const complete=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(complete.status,200);assert.equal(complete.data.user.role,'child');
  });
- await t.test('parent can log out from settings',async()=>{
+ await t.test('parent can log out even when sensitive actions require reauthentication',async()=>{
+  await db.update('app_sessions',{token_hash:'eq.'+hash(tokenParent)},{reauthenticated_at:new Date(Date.now()-11*60000).toISOString()});
+  const blocked=await call('/devices/'+hash(tokenChild),'DELETE',undefined,'parent');
+  assert.equal(blocked.status,403);assert.equal(blocked.error.code,'REAUTH_REQUIRED');
   const loggedOut=await call('/auth/logout','POST',{},'parent');
   assert.equal(loggedOut.status,200);assert.equal(loggedOut.data.loggedOut,true);
   assert.equal((await call('/auth/session','GET',undefined,'parent')).data.authenticated,false);
