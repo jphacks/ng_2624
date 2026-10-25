@@ -127,6 +127,8 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   jar=ownJar;const complete=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(complete.status,200);assert.equal(complete.data.user.role,'child');
  });
  await t.test('AI quota and timeout errors survive HTTP translation without exposing upstream details',async()=>{
+  // Pairing completion above revokes the child's earlier sessions, so restore the fixture session.
+  await db.update('app_sessions',{token_hash:'eq.'+hash(tokenChild)},{revoked_at:null});
   const c=await call('/conversations','POST',{});assert.equal(c.status,201);const cid=c.data.conversationId;
   assert.equal((await call('/conversations/'+cid+'/start','POST',{})).status,200);
   for(const [failure,status,code,expected] of [

@@ -107,7 +107,8 @@ test('database migrations, private proposals, chores, purchases and pairing', as
   await rpc('wb_begin_ai',[child,aiConv,wrong]);
   await assert.rejects(rpc('wb_select_product',[child,aiConv,candidate]),/busy/);
   await assert.rejects(rpc('wb_finish_ai',[child,aiConv,wrong,'提案して',{action:'PROPOSAL',reply:'提案です',proposalDraft:{productId:product,persuasionText:'欲しい',purchaseConditions:[],basedOn:null}}]),/not in conversation/);
-  assert.equal((await db.query('select count(*)::integer as count from messages where conversation_id=$1',[aiConv])).rows[0].count,2);
+  // Selecting the product adds one assistant question; the failed finish adds nothing.
+  assert.equal((await db.query('select count(*)::integer as count from messages where conversation_id=$1',[aiConv])).rows[0].count,3);
   const valid={action:'PROPOSAL',reply:'提案です',proposalDraft:{productId:candidate,persuasionText:'欲しい',purchaseConditions:['お手伝い'],basedOn:null}};
   await rpc('wb_finish_ai',[child,aiConv,wrong,'提案して',valid]);
   const draft=(await db.query('select * from proposals where conversation_id=$1',[aiConv])).rows[0];
