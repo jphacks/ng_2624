@@ -1,7 +1,7 @@
 export { createReply, MAX_PRICE_AGE_MS } from './conversation.ts';
 export type { AIControllerDependencies } from './conversation.ts';
 export { createGeminiGenerator } from './gemini.ts';
-export { searchAmazon } from './amazon.ts';
+export { searchYahooShopping } from './yahoo.ts';
 export { searchRetail, searchYodobashi } from './retail.ts';
 export type { GeminiOptions } from './gemini.ts';
 export { ConversationError } from './errors.ts';

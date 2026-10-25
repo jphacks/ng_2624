@@ -601,7 +601,7 @@ test('画像URLなしで保存された候補は選択肢へ表示しない',asy
  });
  ui.state.session={...session,user:{...session.user,role:'child'}};
  await ui.chat('images');
- assert.doesNotMatch(ui.nodes['#content'].innerHTML,/<img class="product-image"/);assert.match(ui.nodes['#content'].innerHTML,/もういちど Amazonで/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/<img class="product-image"/);assert.match(ui.nodes['#content'].innerHTML,/もういちど Yahoo!ショッピングで/);
 });
 
 test('商品カードは画像・商品名・円価格を表示し説明文を表示しない',async()=>{
@@ -818,7 +818,7 @@ test('子どもへ最初に2つの発言を表示し、自動検索中は結果�
  assert.equal((html.match(/class="chat-message assistant"/g)||[]).length,2);assert.match(html,/いま、なにか ほしいものは ある？/);
  let live='';ui.nodes['.chat-log']={insertAdjacentHTML(_position:string,html:string){live=html;ui.nodes['#search-progress']={remove(){delete ui.nodes['#search-progress'];}};}};
  const pending=ui.submit('message','',{message:'Nintendo Switchがほしい'});
- assert.match(live,/Amazonで ほしいものを さがしているよ。ちょっと まってね。/);
+ assert.match(live,/Yahoo!ショッピングで ほしいものを さがしているよ。ちょっと まってね。/);
  finish({...thread,messages:[{sender:'assistant',content:'見つかったよ'}]});await pending;
  assert.equal(ui.nodes['#search-progress'],undefined);assert.match(ui.nodes['#content'].innerHTML,/見つかったよ/);
 });
@@ -830,4 +830,20 @@ test('好みは保存済みの値を保ち、子ども向けの言葉で表示�
  });await ui.go('#settings');const html=ui.nodes['#content'].innerHTML;
  assert.match(html,/value="科学" checked><span>じっけん/);assert.match(html,/value="読書" checked><span>ほんを よむこと/);
  assert.doesNotMatch(html,/<span>(科学|読書|自然|工作|音楽)<\/span>/);
+});
+
+test('Yahoo!の商品を既存カードに表示し、購入リンクと選択操作を維持する',async()=>{
+ const p={id:'yahoo-product',name:'工作キット <セット>',priceJpy:2980,imageUrl:'https://item-shopping.c.yimg.jp/i/g/shop_item',productUrl:'https://store.shopping.yahoo.co.jp/shop/item.html'};
+ const ui=await frontend(async path=>path==='/conversations/yahoo'?{conversationId:'yahoo',mode:'consultation',phase:'consultation',canMessage:true,products:[p],messages:[]}:basic(path));
+ ui.state.session={...session,user:{...session.user,role:'child'}};
+ await ui.chat('yahoo');const html=ui.nodes['#content'].innerHTML;
+ assert.match(html,/工作キット &lt;セット&gt;/);assert.match(html,/2,980円/);assert.match(html,/src="\/api\/products\/yahoo-product\/image"/);
+ assert.match(html,/data-action="select-product"/);assert.doesNotMatch(html,/Amazon|YAHOO_SHOPPING_APP_ID/);
+ const parentUI=await frontend(async path=>path==='/children'?{children:[{childId:'child',displayName:'子ども'}]}:path.startsWith('/dashboard')?{...dashboard,goals:[{...p,targetAmountYen:2980,status:'active'}]}:basic(path));
+ await parentUI.go('#child-home/child');
+ assert.match(parentUI.nodes['#content'].innerHTML,/href="https:\/\/store.shopping.yahoo.co.jp\/shop\/item.html"/);
+});
+test('通常・デモ共通の入口に公式のプレーンテキスト形式のYahoo!クレジットを表示する',async()=>{
+ const html=await readFile(new URL('../../frontend/index.html',import.meta.url),'utf8');
+ assert.match(html,/<footer class="yahoo-credit">Webサービス by Yahoo! JAPAN （https:\/\/developer.yahoo.co.jp\/sitemap\/）<\/footer>/);
 });

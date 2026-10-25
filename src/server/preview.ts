@@ -30,6 +30,8 @@ function trustedProductImage(value: string | null | undefined, productUrl: strin
     const image = value ? httpsUrl(value) : null;
     if (image && /^(?:www\.)?yodobashi\.com$/.test(product.hostname)
         && image.hostname === 'image.yodobashi.com' && image.pathname.startsWith('/product/')) return image;
+    if (image && ['store.shopping.yahoo.co.jp', 'lohaco.yahoo.co.jp'].includes(product.hostname)
+        && image.hostname === 'item-shopping.c.yimg.jp' && image.pathname.startsWith('/i/')) return image;
     const shop = product.pathname.split('/')[1];
     if (image && product.hostname === 'item.rakuten.co.jp' && shop
         && image.hostname === 'image.rakuten.co.jp' && image.pathname.startsWith('/' + shop + '/')) return image;

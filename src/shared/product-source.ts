@@ -6,6 +6,8 @@ export function isRetailProductUrl(value: string): boolean {
     const host = url.hostname.toLowerCase();
     const path = url.pathname;
     if (/^(?:www\.)?amazon\.co\.jp$/.test(host)) return /\/(?:dp|gp\/product)\/[A-Z0-9]{10}(?:[/?]|$)/i.test(path);
+    if (host === 'store.shopping.yahoo.co.jp') return /^\/[^/]+\/[^/]+\.html$/.test(path);
+    if (host === 'lohaco.yahoo.co.jp') return /^\/store\/[^/]+\/item\/[^/]+\/?$/.test(path);
     if (host === 'item.rakuten.co.jp') return /^\/[^/]+\/[^/]+\/?$/.test(path);
     if (/^(?:www\.)?yodobashi\.com$/.test(host)) return /^\/product\/\d+\/?$/.test(path);
     if (/^(?:www\.)?biccamera\.com$/.test(host)) return /^\/bc\/item\/\d+\/?$/.test(path);

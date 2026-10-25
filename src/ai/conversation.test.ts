@@ -11,7 +11,7 @@ import type { GenerationResult } from './gemini.ts';
 import { CONVERSATION_SEARCH_MESSAGE, type ConversationRequest } from './prompt.ts';
 import { publicUrl } from './validation.ts';
 import { searchProducts, SEARCH_BUDGET_MS } from './search.ts';
-import { parseAmazonResults, searchAmazon } from './amazon.ts';
+import { parseYahooResults, createYahooShoppingSearch } from './yahoo.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const NOW = '2026-10-23T20:00:00+09:00';
@@ -762,135 +762,25 @@ test('chore terms in a product negotiation remain valid conversation content',as
  assert.equal(called,true);
 });
 
-function amazonCard(asin: string, name: string, price: string) {
-    return `<div data-asin="${asin}" data-component-type="s-search-result"><h2><span>${name}</span></h2>${price}</div>`;
-}
-const amazonPrice = (price: number) => `<span class="a-price"><span class="a-offscreen">￥${price.toLocaleString('en-US')}</span></span>`;
-
-test('Amazonの同じ検索カードから商品名・ASIN・現在価格を取得し、別カードの価格や参考価格を混ぜない', () => {
-    const html = [
-        amazonCard('B000000001', '青い車 &amp; 動物', amazonPrice(1000) + '<span class="a-price a-text-price"><span class="a-offscreen">￥2,000</span></span>'),
-        amazonCard('B000000002', '価格のない商品', ''),
-        amazonCard('B000000003', '次の商品', amazonPrice(1100)),
-        amazonCard('B000000004', '範囲外', amazonPrice(2000)),
-        amazonCard('B000000005', '参考価格だけ', '<span class="a-price a-text-price"><span class="a-offscreen">￥1,000</span></span>'),
-        amazonCard('B000000001', '重複商品', amazonPrice(1000)),
-    ].join('');
-    const result = parseAmazonResults(html);
-    assert.deepEqual(result.search?.sources.map(s => s.url), ['https://www.amazon.co.jp/dp/B000000001', 'https://www.amazon.co.jp/dp/B000000003', 'https://www.amazon.co.jp/dp/B000000004']);
-    assert.equal(result.search?.sources[0].title, '青い車 & 動物');
-    assert.deepEqual(result.evidence['amazon-B000000001'], ['青い車 & 動物。表示価格：￥1,000']);
-    assert.doesNotMatch(result.text, /価格のない商品|参考価格だけ|重複商品/);
+test('Yahoo!検索の実商品を既存の候補・提案フローへ渡し、整形AIで再選別しない', async () => {
+ let generations=0;
+ const search=createYahooShoppingSearch(async()=>Response.json({hits:[1500,5000,20000].map((price,i)=>({name:`商品${i}`,price,url:`https://store.shopping.yahoo.co.jp/shop/item${i}.html`,image:{medium:`https://item-shopping.c.yimg.jp/i/g/shop_item${i}`}}))}),()=> 'test-app-id');
+ const output=await createReply({...input(),mode:'consultation',message:CONVERSATION_SEARCH_MESSAGE},{generate:async()=>{generations++;return decision();},search});
+ assert.equal(output.action,'PRODUCT');if(output.action!=='PRODUCT')return;
+ assert.equal(generations,1);assert.deepEqual(output.products.map(p=>[p.size,p.priceJpy]),[['small',1500],['medium',5000],['large',20000]]);
+ assert.ok(output.products.every(p=>p.productUrl.startsWith('https://store.shopping.yahoo.co.jp/')&&p.imageUrl?.startsWith('https://item-shopping.c.yimg.jp/')));
 });
-
-test('Amazon検索は固定HTTPSホスト・価格制限なし・リダイレクト禁止・キャンセル信号を使う', async () => {
-    const controller = new AbortController();
-    let sentSignal: AbortSignal | undefined;
-    const result = await searchAmazon({ systemInstruction: '', input: JSON.stringify({ query: '車 & 動物' }), signal: controller.signal }, async (url, init) => {
-        const parsed = new URL(String(url));
-        assert.equal(parsed.origin, 'https://www.amazon.co.jp');
-        assert.equal(parsed.pathname, '/s');
-        assert.equal(parsed.searchParams.get('k'), '車 & 動物');
-        assert.equal(parsed.searchParams.has('rh'), false);
-        assert.equal(init?.redirect, 'error');
-        sentSignal = init?.signal ?? undefined;
-        return new Response([1, 2, 3].map(i => amazonCard(`B00000000${i}`, `車${i}`, amazonPrice(1000))).join(''), { headers: { 'content-type': 'text/html' } });
-    });
-    assert.equal(result.search?.sources.length, 3);
-    controller.abort();
-    assert.equal(sentSignal?.aborted, true);
+test('Yahoo!検索の候補不足・0件を別サイトやGoogleで水増ししない',async()=>{
+ for(const hits of [[],[{name:'ブロック',price:1000,url:'https://store.shopping.yahoo.co.jp/shop/block.html'}]]){
+  let ai=0;const found=await searchProducts('ブロック',input(),async()=>{ai++;throw Error('must not call');},()=>crypto.randomUUID(),async()=>parseYahooResults({hits}));
+  assert.equal(ai,0);assert.equal(found.products.length,hits.length);
+ }
 });
-
-test('Amazon検索カードの画像はAmazon CDNのものだけを候補へ渡す', () => {
-    const html = [
-        amazonCard('B000000001', '車', amazonPrice(1000) + '<img class="s-image" src="https://m.media-amazon.com/images/I/car.jpg">'),
-        amazonCard('B000000002', '別の商品', amazonPrice(1000) + '<img class="s-image" src="https://127.0.0.1/private">'),
-    ].join('');
-    assert.deepEqual(parseAmazonResults(html).candidates?.map(p => p.imageUrl), ['https://m.media-amazon.com/images/I/car.jpg', null]);
+test('Yahoo!検索エラーは補助AIへ切り替えず呼び出し元に返す',async()=>{
+ for(const code of ['API_ERROR','TIMEOUT','RATE_LIMIT','MISSING_API_KEY'] as const){
+  let ai=0;await assert.rejects(searchProducts('ブロック',input(),async()=>{ai++;throw Error('must not call');},()=>crypto.randomUUID(),async()=>{throw new ConversationError(code,'検索失敗');}),hasCode(code));assert.equal(ai,0);
+ }
 });
-
-test('Amazonの取得失敗・認証チェック・巨大な応答を商品候補として扱わない', async () => {
-    const request = { systemInstruction: '', input: JSON.stringify({ query: '車' }) };
-    for (const response of [
-        new Response('busy', { status: 503 }),
-        new Response('<title>Robot Check</title>', { headers: { 'content-type': 'text/html' } }),
-        new Response(' '.repeat(4 * 1024 * 1024 + 1), { headers: { 'content-type': 'text/html' } }),
-    ]) await assert.rejects(searchAmazon(request, async () => response), hasCode('API_ERROR'));
-});
-
-test('検索ボタンは聞き取りへ戻らず、キーワードを広げて実商品3件を返す', async () => {
-    let generations = 0;
-    const requests: URL[] = [];
-    const html = [1500, 5000, 20000].map((price, i) => amazonCard(`B00000000${i}`, `代案${i}`, amazonPrice(price))).join('');
-    const output = await createReply({ ...input(), mode: 'consultation', message: CONVERSATION_SEARCH_MESSAGE }, {
-        generate: async request => { generations++; assert.match(request.systemInstruction, /必ずSEARCH/); return decision(); },
-        search: request => searchAmazon({ ...request, input: JSON.stringify({ ...JSON.parse(request.input), query: '希望の商品 全条件' }) }, async url => {
-            const parsed = new URL(String(url));
-            requests.push(parsed);
-            const body = parsed.searchParams.has('rh') ? '' : parsed.searchParams.get('k') === '希望の商品' ? html
-                : amazonCard('B000000000', '代案0', amazonPrice(1500));
-            return new Response(body, { headers: { 'content-type': 'text/html' } });
-        }),
-    });
-    assert.equal(output.action, 'PRODUCT');
-    if (output.action !== 'PRODUCT') return;
-    assert.equal(generations, 1, '取得済み商品をモデルの再選別で空にしない');
-    assert.equal(requests.length, 2);
-    assert.equal(requests.filter(url => url.searchParams.has('rh')).length, 0);
-    assert.deepEqual(output.products.map(p => [p.size, p.priceJpy]), [['small', 1500], ['medium', 5000], ['large', 20000]]);
-    assert.equal(new Set(output.products.map(p => p.productUrl)).size, 3);
-    assert.ok(output.products.every(p => p.productUrl.startsWith('https://www.amazon.co.jp/dp/')));
-});
-
-test('Amazonが取得できなくてもGoogle検索・整形APIへ切り替えない', async () => {
- const original=globalThis.fetch;let direct=0,ai=0;
- globalThis.fetch=async()=>{direct++;return new Response('unavailable',{status:503});};
- try{const found=await searchProducts('ブロック',input(),async()=>{ai++;throw Error('must not call');},()=>crypto.randomUUID(),searchAmazon);
- assert.equal(direct,1);assert.equal(ai,0);assert.deepEqual(found.products,[]);
- }finally{globalThis.fetch=original;}
-});
-test('補助検索に失敗してもAmazonで取得済みの商品は保持する', async () => {
-    const found = await searchProducts('ブロック', input(), async () => { throw new Error('search unavailable'); }, () => crypto.randomUUID(),
-        async () => parseAmazonResults(amazonCard('B000000001', 'ブロック', amazonPrice(1000))));
-    assert.equal(found.products.length, 1);
-    assert.equal(found.products[0].productUrl, 'https://www.amazon.co.jp/dp/B000000001');
-});
-
-function supplementalProducts(request: ConversationRequest): GenerationResult {
-    const sources = JSON.parse(request.input).sources;
-    return { text: JSON.stringify({ products: sources.map((s: { id: string; title: string }) => ({
-        name: s.title, description: '実商品の出典を確認。', recommendationReason: '条件を緩めた代案です。',
-        productSourceId: s.id, sourceIds: [s.id], priceJpy: null, priceEvidence: null,
-    })) }), search: null, evidence: {} };
-}
-function supplementalSources(count: number): GenerationResult {
-    return { text: '検索で確認した実商品。価格は未確認。', search: { queries: ['ブロック Amazon'], searchSuggestionsHtml: null,
-        sources: Array.from({length:count}, (_,i)=>({id:`s${i}`,title:`ブロック${i}`,url:`https://www.amazon.co.jp/dp/B00000000${i}`})) }, evidence: {} };
-}
-test('Amazonの候補が0件でも別サイトやGoogleで水増ししない',async()=>{
- let calls=0;const result=await searchProducts('ブロック',input(),async()=>{calls++;throw Error('must not call');},()=>crypto.randomUUID(),async()=>parseAmazonResults(''));
- assert.equal(calls,0);assert.deepEqual(result.products,[]);
-});
-test('整形APIが失敗しても直接取得済みの商品を捨てない',async()=>{
-    const result=await searchProducts('ブロック',input(),async request=>{
-        if(request.search)return supplementalSources(3);
-        throw new ConversationError('TIMEOUT','timeout');
-    },()=>crypto.randomUUID(),async()=>parseAmazonResults(amazonCard('B000000009','取得済みブロック',amazonPrice(1000))));
-    assert.equal(result.products.length,1);assert.equal(result.products[0].name,'取得済みブロック');
-});
-test('Amazonの候補が1件ならその1件を返し、補助検索は呼ばない',async()=>{
- let calls=0;const result=await searchProducts('ブロック',input(),async()=>{calls++;throw Error('must not call');},()=>crypto.randomUUID(),async()=>parseAmazonResults(amazonCard('B000000009','取得済みブロック',amazonPrice(1000))));
- assert.equal(calls,0);assert.equal(result.products.length,1);
-});
-test('Amazonの追加取得失敗でも先に取得した商品を返す',async()=>{
-    let requests=0;
-    const result=await searchAmazon({systemInstruction:'',input:JSON.stringify({query:'ブロック 工作'})},async()=>{
-        if(++requests>1)throw new Error('network error');
-        return new Response(amazonCard('B000000009','取得済みブロック',amazonPrice(1000)),{headers:{'Content-Type':'text/html'}});
-    });
-    assert.equal(result.candidates?.length,1);assert.equal(requests,2);
-});
-
 
 test('a reason summary needs no promise or purchase condition',async()=>{
  const result=await createReply({...input(),mode:'consultation',negotiationHistory:[],sharedConditions:[],products:[product],selectedProductId:product.id}, {generate:async()=>draft({purchaseConditions:[]})});
@@ -916,19 +806,6 @@ test('AI応答失敗の補完でも価格・購入条件・共有交渉の制約
 
 test('自動検索へ切り替わった直後、検索処理より先に進捗を通知する',async()=>{
  const order:string[]=[];
- const result=await createReply({...input(),mode:'consultation',sharedConditions:[]},{generate:async()=>decision({action:'SEARCH',searchQuery:'ブロック'}),onSearchStart:()=>{order.push('progress');},search:async()=>{order.push('search');return parseAmazonResults('');}});
+ const result=await createReply({...input(),mode:'consultation',sharedConditions:[]},{generate:async()=>decision({action:'SEARCH',searchQuery:'ブロック'}),onSearchStart:()=>{order.push('progress');},search:async()=>{order.push('search');return parseYahooResults({hits:[]});}});
  assert.deepEqual(order,['progress','search']);assert.equal(result.action,'HEARING');
-});
-
-test('Amazonの別形式のカード・見出し・価格・画像も同じ商品から取得する',()=>{
- const html=`<div class="s-result-item s-asin" data-asin="B000000001"><h2 aria-label="マインクラフト"></h2><img class="s-image" data-src="https://m.media-amazon.com/images/I/minecraft.jpg"><span data-a-size="xl" class="a-price"><span aria-hidden="true"><span class="a-price-symbol">￥</span><span class="a-price-whole">3,980</span></span></span></div><div data-asin="B000000002" class="s-result-item"><h2>価格なし</h2></div>`;
- const found=parseAmazonResults(html).candidates!;assert.equal(found.length,1);assert.equal(found[0].name,'マインクラフト');assert.equal(found[0].priceJpy,3980);assert.match(found[0].imageUrl!,/minecraft.jpg$/);
-});
-test('Amazonが空の表示形式を返した時は同じ検索語で再取得し、別カテゴリには変えない',async()=>{
- const queries:string[]=[];
- const result=await searchAmazon({systemInstruction:'',input:JSON.stringify({query:'ゲーム'})},async value=>{
-  const url=new URL(String(value));queries.push(url.searchParams.get('k')!);
-  if(queries.length===2)assert.equal(url.searchParams.get('ref'),'nb_sb_noss');
-  return new Response(queries.length===1?'<main>検索結果を準備中</main>':amazonCard('B000000001','ゲーム',amazonPrice(3980)),{headers:{'Content-Type':'text/html'}});
- });assert.deepEqual(queries,['ゲーム','ゲーム']);assert.equal(result.candidates!.length,1);
 });

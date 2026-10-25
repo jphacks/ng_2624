@@ -31,11 +31,15 @@ test('固定ホストの検索で取得し、巨大な応答を拒否する', as
     assert.equal(result.candidates!.length, 2);
     await assert.rejects(searchYodobashi(request, (async () => new Response('x'.repeat(4 * 1024 * 1024 + 1), { headers: { 'content-type': 'text/html' } })) as typeof fetch));
 });
-test('Amazonが遮断された場合はヨドバシの商品を返す', async () => {
-    const result = await searchRetail({ input: JSON.stringify({ query: 'ゲーム' }), systemInstruction: '' }, (async url => {
-        if (new URL(String(url)).hostname === 'www.amazon.co.jp') return new Response('blocked', { status: 503 });
-        return new Response(html, { headers: { 'content-type': 'text/html' } });
-    }) as typeof fetch);
-    assert.equal(result.candidates!.length, 2);
-    assert.equal(result.candidates![0].priceJpy, 59980);
+test('互換入口もYahoo! APIを使い、別販売店に切り替えない', async () => {
+    const original=process.env.YAHOO_SHOPPING_APP_ID;
+    process.env.YAHOO_SHOPPING_APP_ID='test-only';
+    try {
+        let calls=0;
+        await assert.rejects(searchRetail({input:JSON.stringify({query:'ゲーム'}),systemInstruction:''},async url=>{
+            calls++;assert.equal(new URL(String(url)).hostname,'shopping.yahooapis.jp');
+            return new Response('unavailable',{status:503});
+        }));
+        assert.equal(calls,1);
+    } finally {if(original===undefined)delete process.env.YAHOO_SHOPPING_APP_ID;else process.env.YAHOO_SHOPPING_APP_ID=original;}
 });

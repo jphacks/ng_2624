@@ -5,7 +5,7 @@ import { parseProducts } from './protocol.ts';
 import { selectRewards } from './rewards.ts';
 import { publicUrl } from './validation.ts';
 import { ConversationError } from './errors.ts';
-import { searchAmazon } from './amazon.ts';
+import { searchYahooShopping } from './yahoo.ts';
 import { isRetailProductUrl } from '../shared/product-source.ts';
 
 // 販売店の直接取得は各8秒。その後の補助検索も含め、会話生成とHTTPの150秒に収める。
@@ -50,8 +50,8 @@ export async function searchProducts(
         })]);
         controller.signal.throwIfAborted();
         const successful = results.filter((r): r is PromiseFulfilledResult<GenerationResult> => r.status === 'fulfilled');
-        const directAmazon = searchProvider === searchAmazon || successful.some(({ value }) => value.candidates !== undefined);
-        if (!successful.length && !directAmazon) {
+        const directYahoo = searchProvider === searchYahooShopping || successful.some(({ value }) => value.candidates !== undefined);
+        if (!successful.length) {
             const failed = results.find(r => r.status === 'rejected');
             if (failed?.status === 'rejected') throw failed.reason;
         }
@@ -71,7 +71,7 @@ export async function searchProducts(
                 }
             }
             search.searchSuggestionsHtml = [...suggestions].join('\n') || null;
-            // Amazonで取得済みの実商品は、モデルの再選別によって空にしない。
+            // Yahoo!ショッピングで取得済みの実商品は、モデルの再選別によって空にしない。
             if (successful.length && successful.every(({ value }) => value.candidates !== undefined)) {
                 const unique = new Map<string, Omit<ProductCandidate, 'size'>>();
                 for (const { value } of successful) for (const candidate of value.candidates!) {
@@ -86,7 +86,7 @@ export async function searchProducts(
             try { extracted = await generate({ ...buildExtractionRequest(result.text, search, input, result.evidence), timeoutMs: 10_000, signal: controller.signal }); }
             catch (error) {
                 controller.signal.throwIfAborted();
-                if (!directAmazon) throw error;
+                if (!directYahoo) throw error;
                 return { products: selectRewards(products), search };
             }
             controller.signal.throwIfAborted();
@@ -111,12 +111,12 @@ export async function searchProducts(
             return { products: selectRewards(products), search };
         }
         best = await collect();
-        // Native Amazon search is authoritative: never fill gaps with Google or another shop.
-        if (directAmazon) return best;
+        // Native Yahoo!ショッピング search is authoritative: never fill gaps with Google or another shop.
+        if (directYahoo) return best;
         for (let attempt = 0; attempt < 2 && best.products.length < 3; attempt++) {
             try {
                 const request = buildSearchRequest(query, input);
-                request.systemInstruction += '\n直接取得では候補が不足しました。Amazonが見つからなければ楽天市場・ヨドバシ・ビックカメラ・メーカー公式ストアで購入できる個別商品を探してください。価格・機能・ブランドの条件を緩め、主要用途に近い実商品を3件探してください。価格未確認でも実商品の販売ページの出典があれば含め、未確認と明記してください。既に見つかった商品とは異なる商品を優先してください。';
+                request.systemInstruction += '\n直接取得では候補が不足しました。Yahoo!ショッピングが見つからなければ楽天市場・ヨドバシ・ビックカメラ・メーカー公式ストアで購入できる個別商品を探してください。価格・機能・ブランドの条件を緩め、主要用途に近い実商品を3件探してください。価格未確認でも実商品の販売ページの出典があれば含め、未確認と明記してください。既に見つかった商品とは異なる商品を優先してください。';
                 request.input = JSON.stringify({ ...JSON.parse(request.input), query: `${query} ${attempt === 0 ? 'site:item.rakuten.co.jp' : 'site:yodobashi.com/product/ OR site:biccamera.com/bc/item/'}`, existingProducts: best.products.map(p => ({ name: p.name, productUrl: p.productUrl })), retry: attempt > 0 });
                 successful.push({ status: 'fulfilled', value: await generate({ ...request, timeoutMs: 20_000, signal: controller.signal }) });
                 const found = await collect();

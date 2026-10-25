@@ -1,7 +1,7 @@
 import type { GenerationResult } from './gemini.ts';
 import type { ConversationRequest } from './prompt.ts';
 import { ConversationError } from './errors.ts';
-import { searchAmazon } from './amazon.ts';
+import { createYahooShoppingSearch } from './yahoo.ts';
 
 function plain(value: string): string {
     return value.replace(/<[^>]*>/g, '').replace(/&(?:amp|quot|apos|lt|gt|nbsp|#\d+|#x[\da-f]+);/gi, entity => {
@@ -72,20 +72,7 @@ export async function searchYodobashi(request: ConversationRequest, send: typeof
     return result;
 }
 
-/** Amazonが取得できない場合も別販売店から実商品の画像と価格を取得する。 */
+/** 互換入口も通常版と同じYahoo!ショッピング検索を使う。 */
 export async function searchRetail(request: ConversationRequest, send: typeof fetch = fetch): Promise<GenerationResult> {
-    let amazon: GenerationResult | undefined;
-    try { amazon = await searchAmazon(request, send); } catch { request.signal?.throwIfAborted(); }
-    if ((amazon?.candidates?.length ?? 0) >= 3) return amazon!;
-    try {
-        const retail = await searchYodobashi(request, send);
-        if (!amazon) return retail;
-        return { text: amazon.text + retail.text, search: { queries: [...amazon.search!.queries, ...retail.search!.queries],
-            sources: [...amazon.search!.sources, ...retail.search!.sources], searchSuggestionsHtml: null },
-            evidence: { ...amazon.evidence, ...retail.evidence }, candidates: [...amazon.candidates!, ...retail.candidates!] };
-    } catch (error) {
-        request.signal?.throwIfAborted();
-        if (amazon?.candidates?.length) return amazon;
-        throw error;
-    }
+    return createYahooShoppingSearch(send)(request);
 }

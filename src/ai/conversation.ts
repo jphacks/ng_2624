@@ -5,7 +5,7 @@ import type { ReplyGenerator } from './gemini.ts';
 import { buildConversationRequest, CONVERSATION_SEARCH_MESSAGE } from './prompt.ts';
 import { parseDecision } from './protocol.ts';
 import { searchProducts } from './search.ts';
-import { searchAmazon } from './amazon.ts';
+import { searchYahooShopping } from './yahoo.ts';
 import { parseAIInput } from './validation.ts';
 
 /** 価格の再確認間隔。購入価格の保証ではなく、古い候補を提案へ進めないための初期値。 */
@@ -81,11 +81,11 @@ export async function createReply(
             dependencies.onSearchStart?.();
             const found = await searchProducts(decision.searchQuery!, {
                 now: input.now, constraints: input.constraints,
-            }, generate, dependencies.createId ?? (() => crypto.randomUUID()), dependencies.search ?? (dependencies.generate ? generate : searchAmazon));
+            }, generate, dependencies.createId ?? (() => crypto.randomUUID()), dependencies.search ?? (dependencies.generate ? generate : searchYahooShopping));
             const consultation = found.products.length === 3
                 ? input.role === 'child' ? '3つ見つかったよ！ 気になるものをえらんでね。' : '3件の候補が見つかりました。気になるものを選んでください。'
                 : found.products.length ? input.role === 'child' ? `${found.products.length}こ見つかったよ！ 気になるものをえらんでね。` : `${found.products.length}件の候補が見つかりました。`
-                : input.role === 'child' ? 'いま Amazonの おみせを うまく よみこめなかったよ。すこし まってから、もういちど さがしてね。' : 'Amazonの検索結果を読み込めませんでした。少し待ってから再度お試しください。';
+                : input.role === 'child' ? 'いま Yahoo!ショッピングの おみせを うまく よみこめなかったよ。すこし まってから、もういちど さがしてね。' : 'Yahoo!ショッピングの検索結果を読み込めませんでした。少し待ってから再度お試しください。';
             if (!found.products.length) return { ...base, action: 'HEARING', search: found.search, reply: consultation };
             return { ...base, action: 'PRODUCT', ...found, reply: input.role === 'child' ? consultation : `${consultation} 表示価格は検索時の参考価格です。` };
         }

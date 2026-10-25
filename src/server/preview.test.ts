@@ -224,3 +224,19 @@ test('楽天の商品メタデータ画像も保存して、再起動後に商�
  const fresh=createProductPreview({resolve:async()=>[publicAddress],read:async url=>{reads++;assert.equal(url.href,imageUrl);return pngResponse();}});
  assert.deepEqual(await fresh.fetchResolvedProductImage(saved.productUrl,saved.imageUrl),{body:png,contentType:'image/png'});assert.equal(reads,1);
 });
+
+test('Yahoo! APIの画像を既存のプロキシで取得し、商品選択用の価格とURLを維持する',async()=>{
+ const urls:string[]=[];
+ const preview=createProductPreview({resolve:async()=>[publicAddress],read:async value=>{urls.push(value.href);return pngResponse();}});
+ const candidate={...product,productUrl:'https://store.shopping.yahoo.co.jp/shop/item.html',imageUrl:'https://item-shopping.c.yimg.jp/i/g/shop_item'};
+ const prepared=await preview.prepareProduct(candidate);
+ assert.equal(prepared?.priceJpy,3000);assert.equal(prepared?.productUrl,candidate.productUrl);assert.equal(prepared?.imageUrl,candidate.imageUrl);
+ assert.deepEqual(urls,[candidate.imageUrl]);assert.ok(await preview.fetchResolvedProductImage(candidate.productUrl,candidate.imageUrl));
+});
+test('Yahoo!の画像ヒントも不正ホスト・プライベートIPへの転送を許可しない',async()=>{
+ let reads=0;
+ const preview=createProductPreview({resolve:async()=>[publicAddress],read:async value=>{reads++;if(value.hostname==='item-shopping.c.yimg.jp')return {status:302,headers:{location:'https://127.0.0.1/secret'},body:Buffer.alloc(0)};return html('<html></html>');}});
+ const url='https://store.shopping.yahoo.co.jp/shop/item.html';
+ assert.equal(await preview.fetchResolvedProductImage(url,'https://evil.example/a.png'),null);
+ assert.equal(reads,1);assert.equal(await preview.fetchResolvedProductImage(url,'https://item-shopping.c.yimg.jp/i/g/shop_item'),null);assert.equal(reads,2);
+});

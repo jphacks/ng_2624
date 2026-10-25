@@ -12,8 +12,8 @@ function aiFailure(error: unknown, fallback: string): AppError {
   if (error instanceof AppError) return error;
   const code = error instanceof ConversationError ? error.code : 'UNKNOWN';
   console.error('AI request failed', { name: error instanceof Error ? error.name : 'unknown', code });
-  if (code === 'RATE_LIMIT') return new AppError(429, 'RATE_LIMITED', 'AIの利用上限に達したため、商品検索・応答を実行できません。時間を置いて再度お試しください。');
-  if (code === 'TIMEOUT') return new AppError(502, 'AI_UNAVAILABLE', 'AIの応答が時間内に届きませんでした。保存済みの会話を確認してから再操作してください。');
+  if (code === 'RATE_LIMIT') return new AppError(429, 'RATE_LIMITED', '商品検索・AIの利用上限に達しました。時間を置いて再度お試しください。');
+  if (code === 'TIMEOUT') return new AppError(502, 'AI_UNAVAILABLE', '商品検索・AIの応答が時間内に届きませんでした。保存済みの会話を確認してから再操作してください。');
   return new AppError(502, 'AI_UNAVAILABLE', fallback);
 }
 
@@ -157,7 +157,7 @@ export function createApp(config: Config, dep: Dependencies) {
   async function enrichOutput(output: AIOutput): Promise<AIOutput> {
     if (output.action !== 'PRODUCT') return output;
     const products = (await Promise.all(output.products.map(p => dep.enrich(p).catch(() => null)))).filter((p): p is ProductCandidate => p !== null && p.priceJpy !== null && p.priceJpy > 0 && !!p.imageUrl);
-    return products.length ? { ...output, products, reply: products.length === output.products.length ? output.reply : `${products.length}こ見つかったよ！ 気になるものをえらんでね。` } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: 'Amazonから画像とねだんを かくにんできる商品を 取得できなかったよ。もういちど さがしてみてね。' };
+    return products.length ? { ...output, products, reply: products.length === output.products.length ? output.reply : `${products.length}こ見つかったよ！ 気になるものをえらんでね。` } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: 'Yahoo!ショッピングから画像とねだんを かくにんできる商品を 取得できなかったよ。もういちど さがしてみてね。' };
   }
   async function runNegotiationAI(user: Row, id: string, message: string | null) {
     rate(`ai:${user.id}`,20,600000);
@@ -420,7 +420,7 @@ export function createApp(config: Config, dep: Dependencies) {
           const query = text(body.query, 300); return await aiResponse(progress => runAI(user, c.id, `商品検索：${query}`, query, progress));
         }
         if (conversation[3] === 'messages' && method === 'POST') return await aiResponse(progress => runAI(user, c.id, text(body.message), undefined, progress));
-        if (conversation[3] === 'selected-product' && method === 'PATCH') { const selected = (await hydrateProducts(c.products,true)).find(p => p.id === body.selectedProductId); assert(selected && selected.priceJpy !== null && selected.priceJpy > 0 && selected.imageUrl,409,'PRODUCT_UNAVAILABLE','この商品は画像と価格を確認できません。もう一度Amazonで商品を探してください。'); return result(await chatView(user, await db.rpc('wb_select_product', { p_actor_id: user.id, p_conversation_id: c.id, p_product_id: uuid(body.selectedProductId) }))); }
+        if (conversation[3] === 'selected-product' && method === 'PATCH') { const selected = (await hydrateProducts(c.products,true)).find(p => p.id === body.selectedProductId); assert(selected && selected.priceJpy !== null && selected.priceJpy > 0 && selected.imageUrl,409,'PRODUCT_UNAVAILABLE','この商品は画像と価格を確認できません。もう一度Yahoo!ショッピングで商品を探してください。'); return result(await chatView(user, await db.rpc('wb_select_product', { p_actor_id: user.id, p_conversation_id: c.id, p_product_id: uuid(body.selectedProductId) }))); }
         if (conversation[3] === 'reason' && method === 'POST') return result(await saveReason(user,c.id,text(body.reason)));
         if (conversation[3] === 'confirm-reason' && method === 'POST') return result(await chatView(user,await db.rpc('wb_confirm_reason',{p_actor_id:user.id,p_conversation_id:c.id,p_reason:text(body.reasonSummary)})));
         if (conversation[3] === 'proposal-drafts' && method === 'POST') return result(await runAI(user, c.id, null));

@@ -1451,3 +1451,5 @@ body:has(#content.chat-layout-v3) {
 
 .reason-heading{font-size:24px;line-height:1.6}
 form[data-form="reason"] textarea{min-height:160px}
+
+.yahoo-credit{margin:15px;overflow-wrap:anywhere}
