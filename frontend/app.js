@@ -357,11 +357,9 @@ async function action(a,id){
  if(a==='proposal')return go('#proposal/'+id);
  if(a==='consult-proposal'){const d=await api('/proposals/'+path(id));if(!d.canConsult)throw new Error('共有交渉は開始前、回答待ち、または終了しています。');return go('#negotiation/'+d.negotiationId);}
  if(a==='search-product-now'){
-  notice(kid('商品を探しています…','さがしているよ…'));
   const detail=await chatRequest(chatPath()+'/search',{
     fromConversation:true
   });
-  notice();
   return renderChat(detail);
 }
  if(a==='select-product')return renderChat(await api(chatPath()+'/selected-product','PATCH',{selectedProductId:id}));
