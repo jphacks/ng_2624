@@ -37,7 +37,7 @@ function validateSettings(input: Row) {
 function childView(u: Row): Row {
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }); const year = +today.slice(0, 4) - (+today.slice(5, 7) < 4 ? 1 : 0);
   const current = u.grade_level && u.grade_base_school_year ? u.grade_level + year - u.grade_base_school_year : u.grade_level;
-  return { childId: u.id, displayName: u.display_name, birthDate: u.birth_date, gender: u.gender, gradeLevel: current && current <= 12 ? current : null, gradeBaseSchoolYear: year };
+  return { childId: u.id, hasCompletedPairing:!!u.first_paired_at, displayName: u.display_name, birthDate: u.birth_date, gender: u.gender, gradeLevel: current && current <= 12 ? current : null, gradeBaseSchoolYear: year };
 }
 function mapProposal(p: Row) { return { id: p.id, negotiationId: p.negotiation_id, productId: p.product_id, version: p.version, persuasionText: p.persuasion_text, purchaseConditions: p.purchase_conditions, status: p.status }; }
 function mapProduct(p: Row): ProductCandidate { return { id: p.id, name: p.name, priceJpy: p.price_jpy, productUrl: p.product_url, imageUrl: p.image_url, priceCheckedAt: p.price_checked_at, size: p.size || 'small', description: p.description || '', recommendationReason: p.recommendation_reason || '', sourceUrls: p.source_urls || [] }; }
@@ -307,6 +307,7 @@ export function createApp(config: Config, dep: Dependencies) {
       const childRoute = /^\/api\/children\/([\w-]+)(\/(settings|invitations))?$/.exec(path);
       if (childRoute) {
         requireParent(); const id = uuid(childRoute[1]); await family(user, id);
+        if(!childRoute[3]&&method==='DELETE'){assert(body.confirmation==='DELETE_CHILD',400,'INVALID_INPUT','子どもの削除の確認が必要です。');const deleted=await db.rpc('wb_delete_child',{p_actor_id:user.id,p_child_id:id});hydration.clear();return result(deleted);}
         if (!childRoute[3] && method === 'PATCH') { const d = demographic(body); assert(Object.keys(d).length); return result(childView((await db.update('users', { id: eq(id), role: 'eq.child' }, d))[0])); }
         if (childRoute[3] === 'settings' && method === 'GET') return result(await settings(id));
         if (childRoute[3] === 'settings' && method === 'PATCH') return result(await saveSettings(user, id, body));
