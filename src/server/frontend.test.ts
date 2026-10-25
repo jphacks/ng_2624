@@ -5,13 +5,13 @@ import { readFile } from 'node:fs/promises';
 
 // Execute the shipped script with a small DOM boundary. No application-only test hooks.
 const source=await readFile(new URL('../../frontend/app.js',import.meta.url),'utf8');
-async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>){
+async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>,confirm=(_message:string)=>true){
  const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools','#role-label'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
  const location={hash:'#home',search:'',pathname:'/'};
  const events:any={};const window:any={scrollX:0,scrollY:0,scrollTo(position:any){window.scrollX=position.left;window.scrollY=position.top;},addEventListener:(name:string,fn:any)=>{events[name]=fn;}};
  const context=vm.createContext({window,document:{querySelector:(id:string)=>nodes[id],addEventListener:(name:string,fn:any)=>{events[name]=fn;}},location,
  history:{pushState:(_:unknown,__:string,hash:string)=>{location.hash=hash;},replaceState:(_:unknown,__:string,hash:string)=>{location.hash=hash;}},
- sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm:()=>true});
+ sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm});
  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat};})();'),context);
  await new Promise(resolve=>setImmediate(resolve));
  return {...window.testing,nodes,events,location,window};
@@ -174,6 +174,7 @@ test('demo tools do not change navigation or welcome layout',async()=>{
 
 test('current device uses logout while other connections use revocation',async()=>{
  const sent:string[]=[];
+ const confirmations:string[]=[];let accepted=false;
  let devices=[{deviceSessionId:'current',deviceLabel:'保護者の端末',isCurrent:true},{deviceSessionId:'other',deviceLabel:'子どもの端末',isCurrent:false}];
  const ui=await frontend(async(path,method)=>{
   if(method==='POST'||method==='DELETE')sent.push(method+' '+path);
@@ -182,11 +183,16 @@ test('current device uses logout while other connections use revocation',async()
   if(path==='/devices')return {devices};
   if(path==='/pairing/requests')return {requests:[]};
   return basic(path);
- });
+ },message=>{confirmations.push(message);return accepted;});
  await ui.go('#settings');
  const html=ui.nodes['#content'].innerHTML;
  assert.match(html,/この端末からログアウト/);
  assert.doesNotMatch(html,/data-action="revoke-device" data-id="current"|Googleで本人確認する/);
+ await ui.run(()=>ui.action('revoke-device','other'));
+ assert.deepEqual(sent,[]);
+ assert.match(ui.nodes['#content'].innerHTML,/data-id="other"/);
+ assert.match(confirmations[0],/接続を解除しますか/);
+ accepted=true;
  await ui.run(()=>ui.action('revoke-device','other'));
  assert.match(ui.nodes['#notice'].textContent,/接続を解除しました/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-id="other"/);
