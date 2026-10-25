@@ -1319,3 +1319,41 @@ body:has(#content.chat-layout-v3) {
 .chore-card.is-rejected .chore-status { background: #1f6fc4; color: #fff; }
 .chore-card.is-waiting { background: #eeeeee; border-color: #c9c9c9; }
 .chore-card.is-waiting .chore-status { background: #6b6b6b; color: #fff; }
+
+/* Chat layout fix: bottom navigation and composer */
+.app:has(#content.chat-layout-v3) {
+  position: relative;
+  padding-bottom: 0;
+}
+
+.app:has(#content.chat-layout-v3) #navigation:not([hidden]) {
+  position: relative;
+  bottom: auto;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+#content.chat-layout-v3 {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-layout-v3 .chat-scroll-area {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-layout-v3 .chat-fixed-footer {
+  flex-shrink: 0;
+  background: #fff;
+  z-index: 2;
+}
+
+@media (max-width: 600px) {
+  .app:has(#content.chat-layout-v3) {
+    height: 100dvh;
+    margin: 0;
+  }
+}
