@@ -1428,7 +1428,6 @@ body:has(#content.chat-layout-v3) {
 @media(prefers-reduced-motion:reduce){.activity-spinner{animation-duration:2s}}
 
 /* Increase the version in index.html when publishing an app update. */
-.app-version{position:absolute;z-index:101;top:8px;right:8px;padding:4px 8px;border:1px solid #dcecf0;border-radius:8px;background:#fff;color:#54727e;font-size:11px;line-height:1.6;pointer-events:none}
 .demo-tools{right:52px}
 
 /* Keep the selected item compact while the conversation takes the available space. */
