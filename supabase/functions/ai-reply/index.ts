@@ -138,7 +138,7 @@ Deno.serve(async (req) => {
     const { data: preferences, error: preferencesError } = await admin
       .from("user_preferences")
       .select(
-        "interests, desired_items, expected_activities, budget_small, budget_medium, budget_large"
+        "interests, desired_items, expected_activities"
       )
       .eq("user_id", userId)
       .maybeSingle();
@@ -172,11 +172,6 @@ Deno.serve(async (req) => {
       constraints: {
         mustHave: [],
         mustAvoid: [],
-      },
-      rewardGuidelines: {
-        smallJpy: preferences?.budget_small ?? null,
-        mediumJpy: preferences?.budget_medium ?? null,
-        largeJpy: preferences?.budget_large ?? null,
       },
       products: [],
       selectedProductId: null,

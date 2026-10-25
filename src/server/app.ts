@@ -16,7 +16,7 @@ function aiFailure(error: unknown, fallback: string): AppError {
   return new AppError(502, 'AI_UNAVAILABLE', fallback);
 }
 
-const emptySettings = () => ({ rewardGuidelines: { smallJpy: null, mediumJpy: null, largeJpy: null }, constraints: { mustHave: [], mustAvoid: [] }, chorePreferences: [] });
+const emptySettings = () => ({ constraints: { mustHave: [], mustAvoid: [] }, chorePreferences: [] });
 const eq = (v: string) => `eq.${v}`;
 const listOf = (v: string[]) => `in.(${v.join(',')})`;
 function age(birth: string | null) { if (!birth) return null; const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }); const years = +today.slice(0, 4) - +birth.slice(0, 4); return years - (today.slice(5) < birth.slice(5) ? 1 : 0); }
@@ -30,12 +30,6 @@ function demographic(input: Row): Row {
   return out;
 }
 function validateSettings(input: Row) {
-  if (input.rewardGuidelines) {
-    const values = ['smallJpy', 'mediumJpy', 'largeJpy'].map(k => input.rewardGuidelines[k]);
-    for (const value of values) if (value !== undefined && value !== null) integer(value);
-    const [small, medium, large] = values;
-    assert(!(small != null && medium != null && small > medium) && !(medium != null && large != null && medium > large), 400, 'INVALID_INPUT', '目標金額は小・中・大の順に同じか大きい金額を入力してください。');
-  }
   if (input.constraints) for (const k of ['mustHave', 'mustAvoid']) if (k in input.constraints) strings(input.constraints[k]);
   if ('chorePreferences' in input) strings(input.chorePreferences);
 }
@@ -60,7 +54,7 @@ export function createApp(config: Config, dep: Dependencies) {
     if (!members.length) return [];
     return (await db.list('users', { id: listOf([...new Set(members.map(x => x.user_id))]), order: 'created_at.asc' })).map(childView);
   }
-  async function settings(childId: string): Promise<Row> { const s = await one('child_settings', { child_id: eq(childId) }, false); return s ? { childId, rewardGuidelines: { ...emptySettings().rewardGuidelines, ...s.reward_guidelines }, constraints: { ...emptySettings().constraints, ...s.constraints }, chorePreferences: Array.isArray(s.chore_preferences) ? s.chore_preferences : [] } : { childId, ...emptySettings() }; }
+  async function settings(childId: string): Promise<Row> { const s = await one('child_settings', { child_id: eq(childId) }, false); return s ? { childId, constraints: { ...emptySettings().constraints, ...s.constraints }, chorePreferences: Array.isArray(s.chore_preferences) ? s.chore_preferences : [] } : { childId, ...emptySettings() }; }
   async function profile(user: Row): Promise<Row> { const p = await one('user_preferences', { user_id: eq(user.id) }, false); return { displayName: user.display_name, birthDate: user.birth_date || null, gradeLevel: childView(user).gradeLevel, gradeBaseSchoolYear: childView(user).gradeBaseSchoolYear, onboardingCompleted: user.onboarding_completed, chorePreferences: p?.expected_activities || [], profile: { gradeLevel: childView(user).gradeLevel, age: age(user.birth_date), gender: user.gender || null, preferences: { interests: p?.interests || [], wishes: p?.desired_items || [], expectations: p?.expected_activities || [] } } }; }
   async function ownedChat(user: Row, id: string) { return one('conversations', { id: eq(uuid(id)), user_id: eq(user.id) }); }
   async function accessibleProposal(user: Row, id: string): Promise<Row> {
@@ -135,7 +129,7 @@ export function createApp(config: Config, dep: Dependencies) {
       const products=[...n.products];if(!products.some(x=>x.id===p.product_id))products.push(view.product);
       const input:AIInput={requestId:randomUUID(),now:new Date().toISOString(),role:user.role,mode:'negotiation',message,history:[],profile:null,
         negotiationHistory:history.reverse().filter(m=>['user','assistant'].includes(m.sender)).map(m=>({id:m.id,sender:m.sender==='assistant'?'assistant':m.user_id===n.child_id?'child':'parent',content:m.content,createdAt:m.created_at})),
-        sharedConditions:[],constraints:configChild.constraints,rewardGuidelines:configChild.rewardGuidelines,products:products.map(p=>({...p,imageUrl:null})),selectedProductId:n.selected_product_id,currentProposal:mapProposal(p),negotiationResult:view.negotiationResult};
+        sharedConditions:[],constraints:configChild.constraints,products:products.map(p=>({...p,imageUrl:null})),selectedProductId:n.selected_product_id,currentProposal:mapProposal(p),negotiationResult:view.negotiationResult};
       const output=await enrichOutput(await dep.ai(input));
       await db.rpc('wb_finish_negotiation_ai',{p_actor_id:user.id,p_negotiation_id:n.id,p_lock_id:lockId,p_basis_proposal_id:n.basis_proposal_id,p_basis_version:n.basis_version,p_message:message,p_output:output});
       return negotiationView(user,await accessibleNegotiation(user,n.id));
@@ -156,7 +150,7 @@ export function createApp(config: Config, dep: Dependencies) {
       const products = [...c.products];
       if (pv && !products.some(x => x.id === pv.product.id)) products.push(pv.product);
       const child = await one('users', { id: eq(c.child_id || user.id) });
-      const input: AIInput = { searchQuery, childContext: { age: age(child.birth_date), gradeLevel: childView(child).gradeLevel }, requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, expectations: [] } }, sharedConditions: [], constraints: configChild.constraints, rewardGuidelines: configChild.rewardGuidelines, products: products.map(p => ({ ...p, imageUrl: null })), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };
+      const input: AIInput = { searchQuery, childContext: { age: age(child.birth_date), gradeLevel: childView(child).gradeLevel }, requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, expectations: [] } }, sharedConditions: [], constraints: configChild.constraints, products: products.map(p => ({ ...p, imageUrl: null })), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };
       const output = await enrichOutput(await dep.ai(input));
       const updated = await db.rpc('wb_finish_ai', { p_actor_id: user.id, p_conversation_id: c.id, p_lock_id: lockId, p_message: message, p_output: output });
       return chatView(user, updated);
@@ -283,8 +277,7 @@ export function createApp(config: Config, dep: Dependencies) {
       }
       async function saveSettings(actor: Row, id: string, input: Row) {
         validateSettings(input);
-        const old = await settings(id), patch: Row = { child_id: id, parent_id: actor.id, reward_guidelines: old.rewardGuidelines, constraints: old.constraints, chore_preferences: old.chorePreferences };
-        if (input.rewardGuidelines) { const g = { ...old.rewardGuidelines }; for (const k of ['smallJpy', 'mediumJpy', 'largeJpy']) if (k in input.rewardGuidelines) g[k] = input.rewardGuidelines[k] === null ? null : integer(input.rewardGuidelines[k]); assert(g.smallJpy === null || g.mediumJpy === null || g.smallJpy <= g.mediumJpy); assert(g.mediumJpy === null || g.largeJpy === null || g.mediumJpy <= g.largeJpy); patch.reward_guidelines = g; }
+        const old = await settings(id), patch: Row = { child_id: id, parent_id: actor.id, constraints: old.constraints, chore_preferences: old.chorePreferences };
         if (input.constraints) { patch.constraints = { ...old.constraints }; for (const k of ['mustHave', 'mustAvoid']) if (k in input.constraints) patch.constraints[k] = strings(input.constraints[k]); }
         if ('chorePreferences' in input) patch.chore_preferences = strings(input.chorePreferences);
         await db.insert('child_settings', patch, 'child_id'); return settings(id);

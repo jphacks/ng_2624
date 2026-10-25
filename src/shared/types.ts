@@ -75,13 +75,6 @@ export interface PurchaseConstraints {
   mustAvoid: string[];
 }
 
-/** 保護者設定の参考価格。nullは未設定。購入確約ではない。 */
-export interface RewardGuidelines {
-  smallJpy: number | null;
-  mediumJpy: number | null;
-  largeJpy: number | null;
-}
-
 export interface ProductCandidate extends Product {
   size: GoalSize;
   description: string;
@@ -130,8 +123,6 @@ export interface AIInput {
   sharedConditions: SharedCondition[];
   /** BEが今回の閲覧者への公開範囲を検証済みの情報。親の設定値をAIの判断で変更しない。 */
   constraints: PurchaseConstraints;
-  /** BEが保護者の設定と共有範囲を検証済み。許容範囲は各金額の80〜120%。 */
-  rewardGuidelines: RewardGuidelines;
   products: ProductCandidate[];
   selectedProductId: string | null;
   currentProposal: Proposal | null;
@@ -148,11 +139,11 @@ export type NegotiationResult = {
 );
 
 /** 公開検索に必要な条件だけ。発言・履歴・プロフィールを直接持たせない。 */
-export type ProductSearchContext = Pick<AIInput, 'now' | 'constraints' | 'rewardGuidelines'>;
+export type ProductSearchContext = Pick<AIInput, 'now' | 'constraints'>;
 
 /** 共有交渉の判断に渡す項目。個別相談の履歴・プロフィールを持たせない。 */
 export type NegotiationContext = Pick<AIInput,
-  'role' | 'now' | 'message' | 'negotiationHistory' | 'sharedConditions' | 'constraints' | 'rewardGuidelines' | 'products'
+  'role' | 'now' | 'message' | 'negotiationHistory' | 'sharedConditions' | 'constraints' | 'products'
   | 'selectedProductId' | 'currentProposal' | 'negotiationResult'>;
 
 export interface ProposalDraft {

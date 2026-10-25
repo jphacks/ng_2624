@@ -134,3 +134,7 @@ npm run demo
 通常版とは起動入口・DB・Cookieが別です。データはメモリ内だけに保存され、通常のSupabaseへ接続しません。AIは既存の `GEMINI_API_KEY` を使います。詳細は [demo/README.md](demo/README.md) を参照してください。
 
 通常の `npm start` にデモ認証や初期化APIは追加されません。公開時も通常のログインが必要です。デモはループバックに限定し、公開用として起動できない構成です。
+
+### 予算機能を廃止した既存環境の更新
+
+`supabase/migrations/20261025130000_remove_search_budgets.sql` まで適用してください。子ども別の検索予算と旧プロフィールの予算列を削除します。商品価格・目標額・ポイント残高は変更しません。通常の起動方法は `npm start` です。

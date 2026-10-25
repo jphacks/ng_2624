@@ -6,7 +6,6 @@ import { buildConversationRequest, CONVERSATION_SEARCH_MESSAGE } from './prompt.
 import { parseDecision } from './protocol.ts';
 import { searchProducts } from './search.ts';
 import { searchAmazon } from './amazon.ts';
-import { GOAL_SIZES, withinGuideline } from './rewards.ts';
 import { parseAIInput } from './validation.ts';
 
 /** 価格の再確認間隔。購入価格の保証ではなく、古い候補を提案へ進めないための初期値。 */
@@ -60,17 +59,13 @@ export async function createReply(
         }
         if (decision.action === 'HEARING') return { ...base, action: 'HEARING' };
         if (decision.action === 'SEARCH') {
-            if (Object.values(input.rewardGuidelines).some(amount => amount === null)) {
-                return { ...base, action: 'HEARING', reply: '保護者の設定で、大中小それぞれの目安金額を決めてもらえますか？' };
-            }
             const found = await searchProducts(decision.searchQuery!, {
-                now: input.now, constraints: input.constraints, rewardGuidelines: input.rewardGuidelines,
+                now: input.now, constraints: input.constraints,
             }, generate, dependencies.createId ?? (() => crypto.randomUUID()), dependencies.search ?? (dependencies.generate ? generate : searchAmazon));
-            const labels = { small: '小', medium: '中', large: '大' };
-            const missing = GOAL_SIZES.filter(size => !found.products.some(product => product.size === size));
-            const consultation = missing.length
-                ? `${missing.map(size => labels[size]).join('・')}の商品を確認できませんでした。希望条件や目安金額を見直して再検索できます。`
-                : '大中小それぞれ1件の候補が見つかりました。気になるものを1つ選んでください。';
+            const consultation = found.products.length === 3
+                ? '3件の候補が見つかりました。気になるものを1つ選んでください。'
+                : found.products.length ? `${found.products.length}件の候補が見つかりました。気になるものを選ぶか、再検索できます。`
+                : '商品検索に接続できませんでした。もう一度検索してください。';
             if (!found.products.length) return { ...base, action: 'HEARING', search: found.search, reply: consultation };
             return { ...base, action: 'PRODUCT', ...found, reply: `${consultation} 表示価格は検索時の参考価格です。` };
         }
@@ -87,9 +82,7 @@ export async function createReply(
         if (decision.action === 'NEGOTIATION' && !decision.persuasionText) {
             return { ...base, action: 'NEGOTIATION', proposalDraft: null };
         }
-        if (Object.values(input.rewardGuidelines).some(amount => amount === null)) return blocked('保護者の設定で、大中小それぞれの目安金額を決めてもらえますか？');
         if (product.priceJpy === null) return blocked('この商品の価格は未確認です。価格を確認するため、もう一度検索してみませんか？');
-        if (!withinGuideline(product.priceJpy, input.rewardGuidelines[`${product.size}Jpy`])) return blocked('この商品は対応する目安金額の±20％の範囲外です。希望条件や目安金額を見直しますか？');
         const age = product.priceCheckedAt ? Date.parse(input.now) - Date.parse(product.priceCheckedAt) : Infinity;
         if (age < 0 || age > MAX_PRICE_AGE_MS) return blocked('価格情報を更新する必要があります。この商品をもう一度検索してみませんか？');
         if (!decision.constraintsSatisfied) return blocked(decision.reply);

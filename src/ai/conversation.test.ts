@@ -34,7 +34,6 @@ function input(): AIInput {
         sharedConditions: [{ id: 'shared-1', sourceUserId: 'child-1', targetUserId: 'parent-1',
             content: '小学生向けのロボット工作キットを探したい。', approvedAt: NOW }],
         constraints: { mustHave: ['小学生向け'], mustAvoid: [] },
-        rewardGuidelines: { smallJpy: 1000, mediumJpy: 3000, largeJpy: 10000 },
         products: [], selectedProductId: null, currentProposal: null, negotiationResult: null,
     };
 }
@@ -47,7 +46,7 @@ function draft(overrides: Record<string, unknown> = {}) {
         purchaseConditions: ['今週は宿題を4日提出する'], constraintsSatisfied: true, ...overrides });
 }
 function grounded(): GenerationResult {
-    return { text: QUOTE, search: { queries: ['小学生 ロボット工作キット 大中小の目安に合う価格'],
+    return { text: QUOTE, search: { queries: ['小学生 ロボット工作キット '],
         sources: [{ id: 'source-1', title: '販売元', url: PRODUCT_URL }], searchSuggestionsHtml: '<div>Google検索候補</div>' }, evidence: { 'source-1': [QUOTE] } };
 }
 function extraction(overrides: Record<string, unknown> = {}): GenerationResult {
@@ -67,7 +66,7 @@ function searchQueue(results: GenerationResult[], requests: ConversationRequest[
         return result;
     };
 }
-const SEARCH = () => decision({ action: 'SEARCH', searchQuery: '小学生 ロボット工作キット 大中小の目安に合う価格' });
+const SEARCH = () => decision({ action: 'SEARCH', searchQuery: '小学生 ロボット工作キット ' });
 function hasCode(code: ConversationError['code']) { return (error: unknown) => error instanceof ConversationError && error.code === code; }
 
 for (const role of ['parent', 'child'] as const) {
@@ -110,31 +109,31 @@ test('実商品検索は判断→検索→整形の順に進み、出典のURL�
     assert.equal(output.products[0].priceJpy, 2980);
     assert.equal(output.products[0].priceCheckedAt, NOW);
     assert.equal(output.search?.searchSuggestionsHtml, '<div>Google検索候補</div>');
-    assert.deepEqual(requests.map(r => !!r.search), [false, true, true, true, false]);
+    assert.deepEqual(requests.map(r => !!r.search), [false, true, false, true, false, true, false]);
     assert.equal(requests[1].input.includes('工作に取り組んでほしい'), false);
-    assert.equal(requests[4].input.includes('history'), false);
-    assert.match(requests[1].systemInstruction, /今回の担当は小のみ/);
-    assert.match(requests[4].systemInstruction, /最大3件。大中小各1件/);
+    assert.equal(requests[2].input.includes('history'), false);
+    assert.match(requests[1].systemInstruction, /異なる商品を3件/);
+    assert.match(requests[2].systemInstruction, /最大3件。異なる商品/);
     assert.match(requests[1].systemInstruction, /希望の全条件一致は不要/);
-    assert.match(requests[4].systemInstruction, /未達・未確認だけを理由に候補を一律除外しない/);
-    assert.match(requests[4].systemInstruction, /妥協点として明記/);
-    assert.deepEqual(requests.slice(1, 4).map(r => JSON.parse(r.input).targetSize), ['small', 'medium', 'large']);
+    assert.match(requests[2].systemInstruction, /未達・未確認だけを理由に候補を一律除外しない/);
+    assert.match(requests[2].systemInstruction, /妥協点として明記/);
+    assert.equal('targetBudget' in JSON.parse(requests[1].input), false);
     for (const request of requests.slice(1)) {
         const payload = JSON.parse(request.input);
         assert.deepEqual(payload.preferredFeatures, input().constraints.mustHave);
         assert.equal('mustHave' in payload, false);
         assert.equal('constraints' in payload, false);
     }
-    assert.equal((requests[4].schema?.properties as Record<string, { maxItems: number }>).products.maxItems, 3);
-    assert.deepEqual(requests.slice(1).map(r => r.timeoutMs), [20_000, 20_000, 20_000, 10_000]);
-    assert.deepEqual(requests.slice(1).map(r => r.maxOutputTokens), [4096, 4096, 4096, 4096]);
+    assert.equal((requests[2].schema?.properties as Record<string, { maxItems: number }>).products.maxItems, 3);
+    assert.deepEqual(requests.slice(1).map(r => r.timeoutMs), [20_000, 10_000, 20_000, 10_000, 20_000, 10_000]);
+    assert.deepEqual(requests.slice(1).map(r => r.maxOutputTokens), [4096, 4096, 4096, 4096, 4096, 4096]);
 });
 
 test('商品検索は共通の期限で通信を中断し、遅れて届いた結果から整形を始めない', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const requests: ConversationRequest[] = [];
     let resolveSearch!: (value: GenerationResult) => void;
-    const result = searchProducts('工作キット', { ...input(), rewardGuidelines: { smallJpy: null, mediumJpy: 3000, largeJpy: null } }, async request => {
+    const result = searchProducts('工作キット', input(), async request => {
         requests.push(request);
         return new Promise<GenerationResult>(resolve => { resolveSearch = resolve; });
     }, () => 'id');
@@ -153,7 +152,7 @@ test('検索から整形へ進んでも共通の期限を延長しない', async
     let resolveSearch!: (value: GenerationResult) => void;
     let enteredExtraction!: () => void;
     const extractionStarted = new Promise<void>(resolve => { enteredExtraction = resolve; });
-    const result = searchProducts('工作キット', { ...input(), rewardGuidelines: { smallJpy: null, mediumJpy: 3000, largeJpy: null } }, async request => {
+    const result = searchProducts('工作キット', input(), async request => {
         requests.push(request);
         if (request.search) return new Promise<GenerationResult>(resolve => { resolveSearch = resolve; });
         enteredExtraction();
@@ -173,7 +172,6 @@ const rejectedCases: Array<[string, Record<string, unknown>, GenerationResult]> 
     ['架空の出典ID', { productSourceId: 'invented' }, grounded()],
     ['出典IDに未知の値が混ざる', { sourceIds: ['source-1', 'invented'] }, grounded()],
     ['出典が空', { sourceIds: [] }, grounded()],
-    ['目安範囲外', { priceJpy: 6000, priceEvidence: '価格は6,000円です。' }, { ...grounded(), text: '価格は6,000円です。', evidence: { 'source-1': ['価格は6,000円です。'] } }],
 ];
 for (const [label, item, source] of rejectedCases) {
     test(`${label}の商品を候補として返さない`, async () => {
@@ -184,9 +182,10 @@ for (const [label, item, source] of rejectedCases) {
 }
 
 for (const changes of [{ priceEvidence: '価格は1円です。' }, { priceJpy: 2999 }, { priceJpy: null, priceEvidence: null }]) {
-    test(`根拠のない価格を候補にしない：${JSON.stringify(changes)}`, async () => {
+    test(`根拠のない価格は未確認として候補を残す：${JSON.stringify(changes)}`, async () => {
         const result = await createReply(input(), { generate: searchQueue([SEARCH(), grounded(), extraction(changes)]) });
-        assert.equal(result.action, 'HEARING');
+        assert.equal(result.action, 'PRODUCT');
+        if (result.action === 'PRODUCT') assert.equal(result.products[0].priceJpy, null);
         assert.ok(result.search);
     });
 }
@@ -196,13 +195,6 @@ test('検索に出典がなければ整形APIを呼ばずに聞き取りへ戻�
     const result = await createReply(input(), { generate: searchQueue([SEARCH(), { text: '候補なし', search: null, evidence: {} }], requests) });
     assert.equal(result.action, 'HEARING');
     assert.equal(requests.length, 4);
-});
-
-test('目安未設定では検索APIを呼ばず設定を案内する', async () => {
-    const requests: ConversationRequest[] = [];
-    const value = input(); value.rewardGuidelines.mediumJpy = null;
-    const result = await createReply(value, { generate: searchQueue([SEARCH()], requests) });
-    assert.equal(result.action, 'HEARING'); assert.equal(requests.length, 1);
 });
 
 for (const role of ['parent', 'child'] as const) {
@@ -239,7 +231,7 @@ test('再交渉で商品を変える場合もバックエンドの選択IDを使
 });
 
 for (const [label, changes] of [
-    ['価格不明', { priceJpy: null }], ['目安範囲外', { priceJpy: 6000 }],
+    ['価格不明', { priceJpy: null }],
     ['価格確認なし', { priceCheckedAt: null }], ['古い価格', { priceCheckedAt: '2026-10-21T20:00:00+09:00' }],
     ['未来の価格', { priceCheckedAt: '2026-10-24T20:00:00+09:00' }],
 ] as const) {
@@ -279,7 +271,6 @@ const invalidInputs: Array<[string, unknown]> = [
     ['空の発言', { ...input(), message: '  ' }], ['requestIdなし', { ...input(), requestId: undefined }],
     ['不正な日時', { ...input(), now: 'not-a-date' }], ['タイムゾーンなし', { ...input(), now: '2026-10-23T20:00:00' }],
     ['年齢不正', { ...input(), profile: { age: -1 } }],
-    ['負の目安', { ...input(), rewardGuidelines: { ...input().rewardGuidelines, smallJpy: -1 } }],
     ['未提示IDの選択', { ...input(), selectedProductId: 'missing' }],
     ['商品のない提案', { ...input(), currentProposal: proposal }],
     ['履歴へsystem指示', { ...input(), history: [{ ...input().history[0], sender: 'system' }] }],
@@ -408,7 +399,8 @@ test('存在しない日付を入力として受け付けない', async () => {
 test('別の出典にしか存在しない価格の引用を採用しない', async () => {
     const result = grounded(); result.evidence = { 'other-source': [QUOTE] };
     const output = await createReply(input(), { generate: searchQueue([SEARCH(), result, extraction()]) });
-    assert.equal(output.action, 'HEARING');
+    assert.equal(output.action, 'PRODUCT');
+    if (output.action === 'PRODUCT') assert.equal(output.products[0].priceJpy, null);
     assert.ok(output.search);
 });
 
@@ -491,7 +483,7 @@ for (const role of ['parent', 'child'] as const) {
         }
         assert.equal(JSON.parse(requests[0].input).sharedConditions[0].content, value.sharedConditions[0].content);
         assert.equal(requests[0].input.includes('child-1'), false);
-        assert.equal(requests.length, 7);
+        assert.equal(requests.length, 9);
     });
 }
 
@@ -555,31 +547,12 @@ test('BEが取り消した共有条件を次回呼び出しのコンテキスト
     assert.equal(requests[1].input.includes(input().sharedConditions[0].content), false);
 });
 
-// 新しい報酬設定の境界・区分選定を公開入口と同じ関数で確認する。
-test('目安±20％の境界を含み、直外と未設定を除外する', async () => {
-    const { withinGuideline } = await import('./rewards.ts');
-    for (const price of [800, 1000, 1200]) assert.equal(withinGuideline(price, 1000), true);
-    for (const price of [799, 1201]) assert.equal(withinGuideline(price, 1000), false);
-    assert.equal(withinGuideline(1000, null), false);
-    assert.equal(withinGuideline(0, 0), true);
-    assert.equal(withinGuideline(1, 0), false);
-    assert.equal(withinGuideline(801, 1001), true);
-    assert.equal(withinGuideline(800, 1001), false);
-    assert.equal(withinGuideline(1202, 1001), false);
-});
-
-test('各区分1件を目安に近い価格で選び、範囲の重なりでも同じ商品を重複させない', async () => {
+test('価格制限なしで異なる商品を3件選び、価格順の区分を付ける', async () => {
     const { selectRewards } = await import('./rewards.ts');
     const candidate = (id: string, priceJpy: number) => ({ ...product, id, name: id, productUrl: `https://www.tamiya.com/${id}`, priceJpy });
-    const selected = selectRewards([candidate('s-far', 800), candidate('s', 1000), candidate('m', 3000), candidate('l', 10000)], input().rewardGuidelines);
-    assert.deepEqual(selected.map(p => [p.size, p.id]), [['small', 's'], ['medium', 'm'], ['large', 'l']]);
-    // 重なりの候補をsmallに先取りするとmediumが空く。最大件数を優先して割り当てる。
-    const overlap = selectRewards([candidate('overlap', 1100), candidate('only-small', 800), candidate('l', 10000)],
-        { smallJpy: 1000, mediumJpy: 1300, largeJpy: 10000 });
-    assert.deepEqual(overlap.map(p => [p.size, p.id]), [['small', 'only-small'], ['medium', 'overlap'], ['large', 'l']]);
-    const duplicate = selectRewards([candidate('same', 1100), { ...candidate('other', 1100), name: 'same' }],
-        { smallJpy: 1000, mediumJpy: 1300, largeJpy: 10000 });
-    assert.equal(duplicate.length, 1);
+    const selected = selectRewards([candidate('high', 1000000), candidate('low', 1), candidate('middle', 3000)]);
+    assert.deepEqual(selected.map(p => [p.size, p.id]), [['small', 'low'], ['medium', 'middle'], ['large', 'high']]);
+    assert.equal(selectRewards([candidate('same', 10), { ...candidate('other', 20), name: 'same' }]).length, 1);
 });
 
 test('検索で大中小各1件を返し、そのまま提案へ進める', async () => {
@@ -600,26 +573,14 @@ test('検索で大中小各1件を返し、そのまま提案へ進める', asyn
     }
 });
 
-test('不足区分の条件変更を相談し、目安を勝手に変更しない', async () => {
+test('3件未満でも取得済み候補を提示し入力を変更しない', async () => {
     const value = input();
     const before = structuredClone(value);
     const found = await createReply(value, { generate: searchQueue([SEARCH(), grounded(), extraction()]) });
     assert.equal(found.action, 'PRODUCT');
-    assert.match(found.reply, /小・大/);
-    assert.match(found.reply, /希望条件や目安金額を見直し/);
+    assert.match(found.reply, /1件の候補/);
     assert.deepEqual(value, before);
 });
-
-for (const rewardGuidelines of [undefined, { smallJpy: 1000, mediumJpy: 3000 },
-    { smallJpy: 1.5, mediumJpy: 3000, largeJpy: 10000 }]) {
-    test(`旧形式や不正な目安は通信前に拒否：${JSON.stringify(rewardGuidelines)}`, async () => {
-        let calls = 0;
-        await assert.rejects(createReply({ ...input(), rewardGuidelines } as AIInput,
-            { generate: async () => { calls++; return decision(); } }), hasCode('INVALID_INPUT'));
-        assert.equal(calls, 0);
-    });
-}
-
 
 for (const role of ['parent', 'child'] as const) {
     test(`${role}の交渉発言と親子・AIの共有履歴から修正案を作れる`, async () => {
@@ -755,7 +716,7 @@ test('発言も操作対象もない入力は通信前に拒否する', async ()
 test('個別相談の価格未確認・条件不適合でも交渉には移行しない', async () => {
     for (const changes of [
         { products: [{ ...product, priceJpy: null }] },
-        { products: [product], rewardGuidelines: { ...input().rewardGuidelines, mediumJpy: null } },
+
     ]) {
         const output = await createReply({ ...input(), mode: 'consultation', message: null,
             selectedProductId: product.id, ...changes }, { generate: async () => draft() });
@@ -770,7 +731,7 @@ test('explicit product search skips hearing and uses only the supplied public qu
         generate: searchQueue([grounded(), extraction()], requests), createId: () => product.id,
     });
     assert.equal(result.action, 'PRODUCT');
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 6);
     assert.equal(requests[0].search, true);
     const payload = JSON.parse(requests[0].input);
     assert.equal(payload.query, 'Switch スプラトゥーン');
@@ -815,22 +776,22 @@ test('Amazonの同じ検索カードから商品名・ASIN・現在価格を取�
         amazonCard('B000000005', '参考価格だけ', '<span class="a-price a-text-price"><span class="a-offscreen">￥1,000</span></span>'),
         amazonCard('B000000001', '重複商品', amazonPrice(1000)),
     ].join('');
-    const result = parseAmazonResults(html, 800, 1200);
-    assert.deepEqual(result.search?.sources.map(s => s.url), ['https://www.amazon.co.jp/dp/B000000001', 'https://www.amazon.co.jp/dp/B000000003']);
+    const result = parseAmazonResults(html);
+    assert.deepEqual(result.search?.sources.map(s => s.url), ['https://www.amazon.co.jp/dp/B000000001', 'https://www.amazon.co.jp/dp/B000000003', 'https://www.amazon.co.jp/dp/B000000004']);
     assert.equal(result.search?.sources[0].title, '青い車 & 動物');
     assert.deepEqual(result.evidence['amazon-B000000001'], ['青い車 & 動物。表示価格：￥1,000']);
-    assert.doesNotMatch(result.text, /価格のない商品|範囲外|参考価格だけ|重複商品/);
+    assert.doesNotMatch(result.text, /価格のない商品|参考価格だけ|重複商品/);
 });
 
-test('Amazon検索は固定HTTPSホスト・価格帯・リダイレクト禁止・キャンセル信号を使う', async () => {
+test('Amazon検索は固定HTTPSホスト・価格制限なし・リダイレクト禁止・キャンセル信号を使う', async () => {
     const controller = new AbortController();
     let sentSignal: AbortSignal | undefined;
-    const result = await searchAmazon({ systemInstruction: '', input: JSON.stringify({ query: '車 & 動物', targetBudget: { minJpy: 800, maxJpy: 1200 } }), signal: controller.signal }, async (url, init) => {
+    const result = await searchAmazon({ systemInstruction: '', input: JSON.stringify({ query: '車 & 動物' }), signal: controller.signal }, async (url, init) => {
         const parsed = new URL(String(url));
         assert.equal(parsed.origin, 'https://www.amazon.co.jp');
         assert.equal(parsed.pathname, '/s');
         assert.equal(parsed.searchParams.get('k'), '車 & 動物');
-        assert.equal(parsed.searchParams.get('rh'), 'p_36:80000-120000');
+        assert.equal(parsed.searchParams.has('rh'), false);
         assert.equal(init?.redirect, 'error');
         sentSignal = init?.signal ?? undefined;
         return new Response([1, 2, 3].map(i => amazonCard(`B00000000${i}`, `車${i}`, amazonPrice(1000))).join(''), { headers: { 'content-type': 'text/html' } });
@@ -845,11 +806,11 @@ test('Amazon検索カードの画像はAmazon CDNのものだけを候補へ渡�
         amazonCard('B000000001', '車', amazonPrice(1000) + '<img class="s-image" src="https://m.media-amazon.com/images/I/car.jpg">'),
         amazonCard('B000000002', '別の商品', amazonPrice(1000) + '<img class="s-image" src="https://127.0.0.1/private">'),
     ].join('');
-    assert.deepEqual(parseAmazonResults(html, 0, 2000).candidates?.map(p => p.imageUrl), ['https://m.media-amazon.com/images/I/car.jpg', null]);
+    assert.deepEqual(parseAmazonResults(html).candidates?.map(p => p.imageUrl), ['https://m.media-amazon.com/images/I/car.jpg', null]);
 });
 
 test('Amazonの取得失敗・認証チェック・巨大な応答を商品候補として扱わない', async () => {
-    const request = { systemInstruction: '', input: JSON.stringify({ query: '車', targetBudget: { minJpy: 800, maxJpy: 1200 } }) };
+    const request = { systemInstruction: '', input: JSON.stringify({ query: '車' }) };
     for (const response of [
         new Response('busy', { status: 503 }),
         new Response('<title>Robot Check</title>', { headers: { 'content-type': 'text/html' } }),
@@ -857,7 +818,7 @@ test('Amazonの取得失敗・認証チェック・巨大な応答を商品候�
     ]) await assert.rejects(searchAmazon(request, async () => response), hasCode('API_ERROR'));
 });
 
-test('検索ボタンは聞き取りへ戻らず、価格とキーワードを緩めて実商品3件を返す', async () => {
+test('検索ボタンは聞き取りへ戻らず、キーワードを広げて実商品3件を返す', async () => {
     let generations = 0;
     const requests: URL[] = [];
     const html = [1500, 5000, 20000].map((price, i) => amazonCard(`B00000000${i}`, `代案${i}`, amazonPrice(price))).join('');
@@ -874,11 +835,11 @@ test('検索ボタンは聞き取りへ戻らず、価格とキーワードを�
     assert.equal(output.action, 'PRODUCT');
     if (output.action !== 'PRODUCT') return;
     assert.equal(generations, 1, '取得済み商品をモデルの再選別で空にしない');
-    assert.equal(requests.length, 9);
-    assert.equal(requests.filter(url => url.searchParams.has('rh')).length, 3);
+    assert.equal(requests.length, 3);
+    assert.equal(requests.filter(url => url.searchParams.has('rh')).length, 0);
     assert.deepEqual(output.products.map(p => [p.size, p.priceJpy]), [['small', 1500], ['medium', 5000], ['large', 20000]]);
     assert.equal(new Set(output.products.map(p => p.productUrl)).size, 3);
-    assert.ok(output.products.every(p => p.productUrl.startsWith('https://www.amazon.co.jp/dp/') && p.recommendationReason.includes('目安金額±20％を外れ')));
+    assert.ok(output.products.every(p => p.productUrl.startsWith('https://www.amazon.co.jp/dp/')));
 });
 
 test('Amazon直接取得が拒否されてもFlash検索1回へ切り替え、価格を捏造せず3商品を返す', async () => {
@@ -895,12 +856,12 @@ test('Amazon直接取得が拒否されてもFlash検索1回へ切り替え、�
                     sources: [0, 1, 2].map(i => ({ id: `s${i}`, title: `ブロック${i}`, url: `https://www.amazon.co.jp/dp/B00000000${i}` })) } };
             }
             extractions++;
-            assert.match(request.systemInstruction, /目安金額の範囲外や価格未確認でも/);
+            assert.match(request.systemInstruction, /価格未確認でも/);
             return { text: JSON.stringify({ products: JSON.parse(request.input).sources.map((source: { id: string; title: string }) => ({
                 name: source.title, description: '検索で確認した商品。', recommendationReason: '代案です。', productSourceId: source.id, sourceIds: [source.id], priceJpy: null, priceEvidence: null,
             })) }), evidence: {}, search: null };
         }, () => crypto.randomUUID(), searchAmazon);
-        assert.equal(direct, 3); assert.equal(searches, 1); assert.equal(extractions, 1);
+        assert.equal(direct, 1); assert.equal(searches, 1); assert.equal(extractions, 1);
         assert.deepEqual(found.products.map(p => p.size), ['small', 'medium', 'large']);
         assert.ok(found.products.every(p => p.priceJpy === null && p.priceCheckedAt === null && p.recommendationReason.includes('価格は未確認')));
         assert.equal(new Set(found.products.map(p => p.productUrl)).size, 3);
@@ -909,28 +870,9 @@ test('Amazon直接取得が拒否されてもFlash検索1回へ切り替え、�
 
 test('補助検索に失敗してもAmazonで取得済みの商品は保持する', async () => {
     const found = await searchProducts('ブロック', input(), async () => { throw new Error('search unavailable'); }, () => crypto.randomUUID(),
-        async () => parseAmazonResults(amazonCard('B000000001', 'ブロック', amazonPrice(1000)), 0, 10000));
+        async () => parseAmazonResults(amazonCard('B000000001', 'ブロック', amazonPrice(1000))));
     assert.equal(found.products.length, 1);
     assert.equal(found.products[0].productUrl, 'https://www.amazon.co.jp/dp/B000000001');
-});
-
-test('並列検索で同じ出典IDが使われても、URLごとの価格の根拠を混ぜず大中小を返す', async () => {
-    const prices = { small: 1000, medium: 3000, large: 10000 };
-    const found = await searchProducts('ブロック', input(), async request => {
-        const payload = JSON.parse(request.input);
-        assert.deepEqual(Object.values(payload.sourceEvidence), [['価格は1000円です。'], ['価格は3000円です。'], ['価格は10000円です。']]);
-        return { text: JSON.stringify({ products: payload.sources.map((source: { id: string }, index: number) => ({
-            name: `商品${index}`, description: 'ブロック', recommendationReason: '色は未確認です。', productSourceId: source.id, sourceIds: [source.id],
-            priceJpy: Object.values(prices)[index], priceEvidence: `価格は${Object.values(prices)[index]}円です。`,
-        })) }), search: null, evidence: {} };
-    }, () => crypto.randomUUID(), async request => {
-        const size = JSON.parse(request.input).targetSize as keyof typeof prices;
-        const index = Object.keys(prices).indexOf(size);
-        return { text: `商品${index} 価格は${prices[size]}円です。`, search: { queries: [size], searchSuggestionsHtml: null,
-            sources: [{ id: 'same-id', title: `商品${index}`, url: `https://www.amazon.co.jp/dp/B00000000${index}` }] },
-            evidence: { 'same-id': [`価格は${prices[size]}円です。`] } };
-    });
-    assert.deepEqual(found.products.map(p => [p.size, p.priceJpy]), [['small', 1000], ['medium', 3000], ['large', 10000]]);
 });
 
 function supplementalProducts(request: ConversationRequest): GenerationResult {
@@ -949,14 +891,14 @@ test('補助検索が時間切れでも再検索で実商品3件を提示する'
     const result=await searchProducts('ブロック',input(),async request=>{
         if(request.search){if(++searches===1)throw new ConversationError('TIMEOUT','timeout');return supplementalSources(3);}
         return supplementalProducts(request);
-    },()=>crypto.randomUUID(),async()=>parseAmazonResults('',0,10000));
+    },()=>crypto.randomUUID(),async()=>parseAmazonResults(''));
     assert.equal(searches,2);assert.equal(result.products.length,3);
     assert.ok(result.products.every(p=>p.priceJpy===null));
 });
 test('補助検索が1商品しか返さないとき、別の商品を追加検索して3件そろえる',async()=>{
     let searches=0;
     const result=await searchProducts('ブロック',input(),async request=>request.search?supplementalSources(++searches===1?1:3):supplementalProducts(request),
-        ()=>crypto.randomUUID(),async()=>parseAmazonResults('',0,10000));
+        ()=>crypto.randomUUID(),async()=>parseAmazonResults(''));
     assert.equal(searches,2);assert.equal(result.products.length,3);
     assert.equal(new Set(result.products.map(p=>p.productUrl)).size,3);
 });
@@ -964,20 +906,20 @@ test('整形APIが失敗しても直接取得済みの商品を捨てない',asy
     const result=await searchProducts('ブロック',input(),async request=>{
         if(request.search)return supplementalSources(3);
         throw new ConversationError('TIMEOUT','timeout');
-    },()=>crypto.randomUUID(),async()=>parseAmazonResults(amazonCard('B000000009','取得済みブロック',amazonPrice(1000)),0,10000));
+    },()=>crypto.randomUUID(),async()=>parseAmazonResults(amazonCard('B000000009','取得済みブロック',amazonPrice(1000))));
     assert.equal(result.products.length,1);assert.equal(result.products[0].name,'取得済みブロック');
 });
 test('全体の期限に達しても取得済みの商品を表示できる',async t=>{
     t.mock.timers.enable({apis:['setTimeout']});
     let entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;});
     const pending=searchProducts('ブロック',input(),async()=>{entered();return new Promise<GenerationResult>(()=>{});},()=>crypto.randomUUID(),
-        async()=>parseAmazonResults(amazonCard('B000000009','取得済みブロック',amazonPrice(1000)),0,10000));
+        async()=>parseAmazonResults(amazonCard('B000000009','取得済みブロック',amazonPrice(1000))));
     await started;t.mock.timers.tick(SEARCH_BUDGET_MS);
     const result=await pending;assert.equal(result.products.length,1);
 });
 test('Amazonの追加取得失敗でも先に取得した商品を返す',async()=>{
     let requests=0;
-    const result=await searchAmazon({systemInstruction:'',input:JSON.stringify({query:'ブロック',targetBudget:{minJpy:800,maxJpy:1200}})},async()=>{
+    const result=await searchAmazon({systemInstruction:'',input:JSON.stringify({query:'ブロック'})},async()=>{
         if(++requests>1)throw new Error('network error');
         return new Response(amazonCard('B000000009','取得済みブロック',amazonPrice(1000)),{headers:{'Content-Type':'text/html'}});
     });

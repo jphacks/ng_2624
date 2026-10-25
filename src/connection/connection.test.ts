@@ -11,7 +11,7 @@ const examples: { [K in FEOperation]: FERequestMap[K] } = {
   'child.create': { displayName: '子供' },
   'child.rename': { childId: 'child-1', displayName: '子供' },
   'child.settings.get': { childId: 'child-1' },
-  'child.settings.update': { childId: 'child-1', rewardGuidelines: { smallJpy: 0, mediumJpy: null } },
+  'child.settings.update': { childId: 'child-1', constraints: { mustHave: ['丈夫'], mustAvoid: [] } },
   'children.list': {},
   'conversations.list': {},
   'negotiations.list': {},
@@ -77,15 +77,12 @@ test('空の更新や部分オブジェクトのnullを拒否する', () => {
   for (const value of [{}, { profile: {} }, { profile: { preferences: {} } }, { profile: null }, { displayName: ' ' }]) {
     reject('profile.update', value);
   }
-  for (const value of [{ childId: 'c' }, { childId: 'c', rewardGuidelines: {} }, { childId: 'c', constraints: null }]) {
+  for (const value of [{ childId: 'c' }, { childId: 'c', constraints: {} }, { childId: 'c', constraints: null }]) {
     reject('child.settings.update', value);
   }
   reject('proposal.edit', { proposalId: 'p', version: 1 });
 });
-test('金額と年齢の範囲や配列要素数を検証する', () => {
-  for (const value of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '1000']) {
-    reject('child.settings.update', { childId: 'c', rewardGuidelines: { smallJpy: value } });
-  }
+test('年齢の範囲や配列要素数を検証する', () => {
   for (const value of [-1, 121, 1.5, '10']) reject('profile.update', { profile: { age: value } });
   reject('profile.update', { profile: { preferences: { wishes: Array(13).fill('商品') } } });
   reject('profile.update', { profile: { preferences: { wishes: [''] } } });

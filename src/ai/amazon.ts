@@ -15,7 +15,7 @@ function plain(value: string): string {
 }
 
 /** Amazonの検索カードから商品ID・商品名・表示価格を同じカード内で取得する。 */
-export function parseAmazonResults(html: string, minJpy: number, maxJpy: number): GenerationResult {
+export function parseAmazonResults(html: string): GenerationResult {
     const result: GenerationResult = { text: '', search: { queries: [], sources: [], searchSuggestionsHtml: null }, evidence: {}, candidates: [] };
     const cards = [...html.matchAll(/<div\b[^>]*\bdata-component-type=["']s-search-result["'][^>]*>/g)];
     const seen = new Set<string>();
@@ -31,7 +31,7 @@ export function parseAmazonResults(html: string, minJpy: number, maxJpy: number)
         const match = current && plain(current[2]).match(/^[¥￥]\s*([\d,]+)(?:\.00)?$/);
         if (!match) continue;
         const price = Number(match[1].replaceAll(',', ''));
-        if (!Number.isSafeInteger(price) || price < minJpy || price > maxJpy) continue;
+        if (!Number.isSafeInteger(price) || price < 0) continue;
         const id = `amazon-${asin}`, url = `https://www.amazon.co.jp/dp/${asin}`;
         const quote = `${name}。表示価格：￥${price.toLocaleString('en-US')}`;
         const imageTag = card.match(/<img\b[^>]*\bclass=["'][^"']*\bs-image\b[^"']*["'][^>]*>/i)?.[0];
@@ -49,10 +49,8 @@ export function parseAmazonResults(html: string, minJpy: number, maxJpy: number)
 
 /** 固定のAmazonホストにだけ接続。リダイレクト・巨大な応答・長時間の取得を許可しない。 */
 export async function searchAmazon(request: ConversationRequest, send: typeof fetch = fetch): Promise<GenerationResult> {
-    const { query, targetBudget } = JSON.parse(request.input);
-    if (typeof query !== 'string' || !query.trim() || query.length > 300
-        || !Number.isSafeInteger(targetBudget?.minJpy) || !Number.isSafeInteger(targetBudget?.maxJpy)
-        || targetBudget.minJpy < 0 || targetBudget.maxJpy < targetBudget.minJpy) {
+    const { query } = JSON.parse(request.input);
+    if (typeof query !== 'string' || !query.trim() || query.length > 300) {
         throw new ConversationError('INVALID_INPUT', '商品検索の条件を確認してください。');
     }
     const result: GenerationResult = { text: '', search: { queries: [], sources: [], searchSuggestionsHtml: null }, evidence: {}, candidates: [] };
@@ -68,7 +66,6 @@ export async function searchAmazon(request: ConversationRequest, send: typeof fe
             signal.throwIfAborted();
             const url = new URL('https://www.amazon.co.jp/s');
             url.searchParams.set('k', attempts[attempt]);
-            if (attempt === 0) url.searchParams.set('rh', `p_36:${targetBudget.minJpy * 100}-${targetBudget.maxJpy * 100}`);
             const response = await send(url, { redirect: 'error', signal, headers: { Accept: 'text/html', 'Accept-Language': 'ja-JP' } });
             if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) {
                 await response.body?.cancel();
@@ -91,14 +88,14 @@ export async function searchAmazon(request: ConversationRequest, send: typeof fe
             if (/<title>[^<]*(?:Robot Check|ロボットチェック)/i.test(html) || /action=["'][^"']*validateCaptcha/i.test(html)) {
                 throw new ConversationError('API_ERROR', 'Amazonの商品検索を一時的に利用できません。');
             }
-            const found = parseAmazonResults(html, attempt === 0 ? targetBudget.minJpy : 0, attempt === 0 ? targetBudget.maxJpy : Number.MAX_SAFE_INTEGER);
+            const found = parseAmazonResults(html);
             result.search!.queries.push(attempts[attempt]);
             for (const candidate of found.candidates!) {
                 const key = candidate.name.trim().toLowerCase();
                 if (seen.has(candidate.productUrl) || names.has(key)) continue;
                 seen.add(candidate.productUrl);
                 names.add(key);
-                result.candidates!.push({ ...candidate, recommendationReason: attempt === 0 ? candidate.recommendationReason : '候補を揃えるため価格・検索条件を緩めた代案です。希望の機能は未確認です。' });
+                result.candidates!.push({ ...candidate, recommendationReason: attempt === 0 ? candidate.recommendationReason : '候補を揃えるため検索条件を緩めた代案です。希望の機能は未確認です。' });
             }
             for (const source of found.search!.sources) {
                 if (result.search!.sources.some(item => item.id === source.id)) continue;

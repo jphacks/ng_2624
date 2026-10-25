@@ -119,10 +119,16 @@ test('a hearing response during proposal generation remains in chat even with an
  assert.match(ui.nodes['#notice'].textContent,/条件を確認/);
 });
 
-test('invalid goal amounts prevent child registration before sending a request',async()=>{
- const sent:string[]=[];const ui=await frontend(async(path,method)=>{if(method==='POST')sent.push(path);return basic(path);});
- await assert.rejects(ui.submit('create-child','',{displayName:'子',smallJpy:'1000',mediumJpy:'100',largeJpy:'10000'}),/小・中・大/);
- assert.equal(sent.length,0);
+test('child registration has no budget fields or reward guidelines in its request',async()=>{
+ const sent:any[]=[];const ui=await frontend(async(path,method,body)=>{
+  if(path==='/children'&&method==='POST'){sent.push(body);return {childId:'child'};}
+  return basic(path);
+ });
+ await ui.go('#children');
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/smallJpy|mediumJpy|largeJpy|目標の目安/);
+ await ui.submit('create-child','',{displayName:'子',birthDate:'2017-04-01',gradeLevel:'elementary_3',chorePreferences:''});
+ assert.equal(sent.length,1);
+ assert.equal('rewardGuidelines' in sent[0],false);
 });
 
 test('parent and child receive different chat introduction and settings links',async()=>{
@@ -583,4 +589,14 @@ test('spinner stays visible while an older overlapping request is still pending'
  assert.equal(ui.nodes['#activity-indicator'].hidden,false);
  finish({conversationId:'slow',messages:[],products:[]});await pending;
  assert.equal(ui.nodes['#activity-indicator'].hidden,true);
+});
+
+test('画像URLなしで保存された商品も画像APIから取得を試みる',async()=>{
+ const ui=await frontend(async path=>{
+  if(path==='/conversations/images')return {conversationId:'images',messages:[],products:[{id:'game-1',name:'ゲーム',imageUrl:null,productUrl:'https://www.amazon.co.jp/dp/B000000001',priceJpy:1000}]};
+  return basic(path);
+ });
+ ui.state.session={...session,user:{...session.user,role:'child'}};
+ await ui.chat('images');
+ assert.match(ui.nodes['#content'].innerHTML,/<img class="product-image" src="\/api\/products\/game-1\/image"/);
 });

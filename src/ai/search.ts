@@ -2,7 +2,7 @@ import type { ProductSearchContext, ProductCandidate, SearchMetadata } from '../
 import type { ReplyGenerator, GenerationResult } from './gemini.ts';
 import { buildExtractionRequest, buildSearchRequest } from './prompt.ts';
 import { parseProducts } from './protocol.ts';
-import { GOAL_SIZES, selectRewards } from './rewards.ts';
+import { selectRewards } from './rewards.ts';
 import { publicUrl } from './validation.ts';
 import { ConversationError } from './errors.ts';
 import { searchAmazon } from './amazon.ts';
@@ -35,12 +35,9 @@ export async function searchProducts(
         }, SEARCH_BUDGET_MS);
     });
     async function work() {
-        const sizes = GOAL_SIZES.filter(size => input.rewardGuidelines[`${size}Jpy`] !== null);
-        const results = await Promise.allSettled(sizes.map(size => searchProvider({
-            ...buildSearchRequest(query, { ...input, rewardGuidelines: {
-                smallJpy: null, mediumJpy: null, largeJpy: null, [`${size}Jpy`]: input.rewardGuidelines[`${size}Jpy`],
-            } }, size), timeoutMs: 20_000, signal: controller.signal,
-        })));
+        const results = await Promise.allSettled([searchProvider({
+            ...buildSearchRequest(query, input), timeoutMs: 20_000, signal: controller.signal,
+        })]);
         controller.signal.throwIfAborted();
         const successful = results.filter((r): r is PromiseFulfilledResult<GenerationResult> => r.status === 'fulfilled');
         const directAmazon = searchProvider === searchAmazon || successful.some(({ value }) => value.candidates !== undefined);
@@ -70,21 +67,17 @@ export async function searchProducts(
                 for (const { value } of successful) for (const candidate of value.candidates!) {
                     if (!unique.has(candidate.productUrl)) unique.set(candidate.productUrl, { ...candidate, id: createId(), priceCheckedAt: input.now });
                 }
-                const products = selectRewards([...unique.values()], input.rewardGuidelines, true);
-                for (const product of products) {
-                    const amount = input.rewardGuidelines[`${product.size}Jpy`]!;
-                    if (product.priceJpy! < amount * .8 || product.priceJpy! > amount * 1.2) product.recommendationReason += ' この区分の目安金額±20％を外れています。';
-                }
+                const products = selectRewards([...unique.values()]);
                 return { products, search };
             }
             if (!search.sources.length) return { products: [], search };
             const products: Omit<ProductCandidate, 'size'>[] = successful.flatMap(({ value }) => (value.candidates ?? []).map(candidate => ({ ...candidate, id: createId(), priceCheckedAt: input.now })));
             let extracted: GenerationResult;
-            try { extracted = await generate({ ...buildExtractionRequest(result.text, search, input, result.evidence, directAmazon), timeoutMs: 10_000, signal: controller.signal }); }
+            try { extracted = await generate({ ...buildExtractionRequest(result.text, search, input, result.evidence), timeoutMs: 10_000, signal: controller.signal }); }
             catch (error) {
                 controller.signal.throwIfAborted();
                 if (!directAmazon) throw error;
-                return { products: selectRewards(products, input.rewardGuidelines, true), search };
+                return { products: selectRewards(products), search };
             }
             controller.signal.throwIfAborted();
             const usedUrls = new Set(products.map(p => p.productUrl));
@@ -96,7 +89,7 @@ export async function searchProducts(
                 const productUrl = publicUrl(source.url)!;
                 if (usedUrls.has(productUrl)) continue;
                 const priceJpy = supportedPrice(item.priceJpy, item.priceEvidence, item.sourceIds, result);
-                if (priceJpy === null && !directAmazon) continue;
+
                 products.push({
                     id: createId(), name: item.name, priceJpy, productUrl, imageUrl: null,
                     priceCheckedAt: priceJpy === null ? null : input.now,
@@ -105,10 +98,10 @@ export async function searchProducts(
                 });
                 usedUrls.add(productUrl);
             }
-            return { products: selectRewards(products, input.rewardGuidelines, directAmazon), search };
+            return { products: selectRewards(products), search };
         }
         best = await collect();
-        if (directAmazon) for (let attempt = 0; attempt < 2 && best.products.length < sizes.length; attempt++) {
+        for (let attempt = 0; attempt < 2 && best.products.length < 3; attempt++) {
             try {
                 const request = buildSearchRequest(query, input);
                 request.systemInstruction += '\n直接取得では候補が不足しました。価格・機能・ブランドの条件を緩め、主要用途に近いAmazonの商品詳細ページを3件探してください。価格未確認でも実商品の出典があれば含め、未確認と明記してください。既に見つかった商品とは異なる商品を優先してください。';
@@ -117,7 +110,7 @@ export async function searchProducts(
                 const found = await collect();
                 // 再整形で候補が減っても、取得済みの実商品を捨てない。
                 const merged: Map<string, ProductCandidate> = new Map([...best.products, ...found.products].map(p => [p.productUrl, p]));
-                best = { products: selectRewards([...merged.values()], input.rewardGuidelines, true), search: found.search };
+                best = { products: selectRewards([...merged.values()]), search: found.search };
             } catch (error) { controller.signal.throwIfAborted(); /* 次の補助検索へ進み、取得済み候補は保持する。 */ }
         }
         return best;

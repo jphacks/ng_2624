@@ -146,7 +146,6 @@ export function parseAIInput(value: unknown): AIInput {
     if (input.role !== 'parent' && input.role !== 'child') invalid('role');
     if (input.mode !== 'consultation' && input.mode !== 'negotiation') invalid('mode');
     const constraints = record(input.constraints, 'constraints');
-    const guidelines = record(input.rewardGuidelines, 'rewardGuidelines');
     const result: AIInput = {
         requestId: text(input.requestId, 'requestId', 128), now: date(input.now, 'now'),
         role: input.role, message: input.message === null ? null : text(input.message, 'message'),
@@ -158,11 +157,6 @@ export function parseAIInput(value: unknown): AIInput {
         constraints: {
             mustHave: list(constraints.mustHave, 'constraints.mustHave', (v, f) => text(v, f, 300), 12),
             mustAvoid: list(constraints.mustAvoid, 'constraints.mustAvoid', (v, f) => text(v, f, 300), 12),
-        },
-        rewardGuidelines: {
-            smallJpy: money(guidelines.smallJpy, 'rewardGuidelines.smallJpy'),
-            mediumJpy: money(guidelines.mediumJpy, 'rewardGuidelines.mediumJpy'),
-            largeJpy: money(guidelines.largeJpy, 'rewardGuidelines.largeJpy'),
         },
         products: list(input.products, 'products', product, 20),
         selectedProductId: input.selectedProductId === null ? null : text(input.selectedProductId, 'selectedProductId', 128),
