@@ -81,11 +81,20 @@ function captureView(){
  const values=new Map(fields.map(e=>[key(e),{value:e.value,checked:e.checked,focused:document.activeElement===e,start:e.selectionStart,end:e.selectionEnd}]));
  const scroll=[...(content.querySelectorAll?.('.chat-scroll-area,textarea')||[])].map(e=>({top:e.scrollTop,left:e.scrollLeft}));
  const details=[...(content.querySelectorAll?.('details')||[])].map(e=>e.open),dirty=state.dirty,top=window.scrollY,left=window.scrollX;
- return ()=>{for(const e of content.querySelectorAll?.('input,textarea,select')||[]){const v=values.get(key(e));if(!v)continue;e.value=v.value;if(v.checked!==undefined)e.checked=v.checked;if(v.focused){e.focus?.({preventScroll:true});if(typeof v.start==='number'&&e.setSelectionRange){try{e.setSelectionRange(v.start,v.end);}catch{}}}}
+ return ()=>{for(const e of content.querySelectorAll?.('input,textarea,select')||[]){const v=values.get(key(e));if(!v)continue;if(e.value!==v.value)e.value=v.value;if(v.checked!==undefined&&e.checked!==v.checked)e.checked=v.checked;if(v.focused){e.focus?.({preventScroll:true});if(typeof v.start==='number'&&e.setSelectionRange){try{e.setSelectionRange(v.start,v.end);}catch{}}}}
  [...(content.querySelectorAll?.('details')||[])].forEach((e,i)=>{if(details[i]!==undefined)e.open=details[i];});
  [...(content.querySelectorAll?.('.chat-scroll-area,textarea')||[])].forEach((e,i)=>{if(scroll[i]){e.scrollTop=scroll[i].top;e.scrollLeft=scroll[i].left;}});state.dirty=dirty;window.scrollTo?.({left,top,behavior:'instant'});};
 }
-function render(html){const content=$('#content'),preserve=backgroundEpoch===state.epoch;if(preserve&&composing)return;const restore=preserve?captureView():null;state.loading=false;if(!preserve)state.dirty=false;content.classList?.remove('chat-layout-fixed-v2','chat-layout-v3');if(lastRendered!==html||!preserve)content.innerHTML=html;lastRendered=html;content.setAttribute('aria-busy','false');restore?.();rememberView(html);}
+function render(html){
+ const content=$('#content'),preserve=backgroundEpoch===state.epoch;
+ // Native date inputs expose an empty value while only some date segments are entered.
+ // Keeping the original element is the only way to preserve those segments and the date picker.
+ if(preserve&&(composing||document.activeElement?.matches?.('input[type="date"]')||[...(content.querySelectorAll?.('input[type="date"]')||[])].some(e=>e.validity?.badInput)))return;
+ state.loading=false;content.setAttribute('aria-busy','false');
+ if(preserve&&lastRendered===html){rememberView(html);return;}
+ const restore=preserve?captureView():null;if(!preserve)state.dirty=false;
+ content.classList?.remove('chat-layout-fixed-v2','chat-layout-v3');content.innerHTML=html;lastRendered=html;restore?.();rememberView(html);
+}
 function loading(){render('');state.loading=true;$('#content').setAttribute('aria-busy','true');}
 function nav(){ if(!parent())closePairingDialog();const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=navLink('#home','home','ホーム')+(!parent()||state.canNegotiate?navLink('#conversations','chat',parent()?'親子で相談':'ぽぽにそうだん'):'')+navLink('#settings','gear',parent()?'設定':'じぶんの設定'); }
 // Line icons for the bottom bar: house, hand, speech bubble, gear.
@@ -382,6 +391,13 @@ async function submit(name,id,f){
  if(name==='respond-proposal'){if(f.decision!=='approved'&&!f.reason.trim())throw new Error('理由を書いてください。');const d=await api('/proposals/'+path(id)+'/responses','POST',{version:state.proposal.proposal.version,decision:f.decision,reason:f.reason.trim()||null});if(d.canConsult)return go('#negotiation/'+d.negotiationId);await proposal(id);return notice(f.decision==='approved'?'合意して、目標に登録しました。':'理由を伝えて、今回は見送りにしました。');}
 }
 document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b){e.preventDefault();if(['child-home','child-settings','open-chat','open-negotiation','proposal','reload'].includes(b.dataset.action)){Promise.resolve(action(b.dataset.action,b.dataset.id)).catch(error);}else run(()=>action(b.dataset.action,b.dataset.id),b);return;}const a=e.target.closest('a[href^="#"]');if(a){e.preventDefault();void go(a.getAttribute('href'));}});
+document.addEventListener('keydown',e=>{
+ if(e.key!=='Enter'||e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||e.isComposing||composing||e.keyCode===229)return;
+ const input=e.target,form=input.closest?.('form[data-form="message"]');
+ if(!form||!input.matches?.('textarea[name="message"]'))return;
+ e.preventDefault();if(e.repeat||state.busy||!input.value.trim())return;
+ form.requestSubmit();
+});
 document.addEventListener('input',e=>{if(e.target.closest('[data-form="edit-proposal"]'))state.dirty=true;});
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
 document.addEventListener('submit',e=>{const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();const data=Object.fromEntries(new FormData(f));run(()=>submit(f.dataset.form,f.dataset.id,data),f);});
