@@ -30,6 +30,9 @@ function trustedProductImage(value: string | null | undefined, productUrl: strin
     const image = value ? httpsUrl(value) : null;
     if (image && /^(?:www\.)?yodobashi\.com$/.test(product.hostname)
         && image.hostname === 'image.yodobashi.com' && image.pathname.startsWith('/product/')) return image;
+    const shop = product.pathname.split('/')[1];
+    if (image && product.hostname === 'item.rakuten.co.jp' && shop
+        && image.hostname === 'image.rakuten.co.jp' && image.pathname.startsWith('/' + shop + '/')) return image;
   } catch { /* Unsupported hint. */ }
   return null;
 }
@@ -237,6 +240,8 @@ export function createProductPreview(deps: Dependencies = dependencies) {
       }
       if (!imageUrl) return null;
       const image = await read(imageUrl, IMAGE_LIMIT, signal);
+      const trusted = trustedProductImage(imageUrl.href, productUrl);
+      if (trusted) { if (imageHints.size >= 64) imageHints.delete(imageHints.keys().next().value!); imageHints.set(productUrl, trusted.href); }
       const contentType = String(image.response.headers['content-type']).split(';')[0].trim().toLowerCase();
       return validImage(image.response.body, contentType) ? { body: image.response.body, contentType } : null;
     } catch { return null; }
@@ -309,7 +314,7 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     const found = metadata.get(product.productUrl);
     const price = product.priceJpy === null && found?.priceJpy != null
       ? { priceJpy: found.priceJpy, priceCheckedAt: found.checkedAt } : {};
-    return { ...product, ...price, imageUrl: image ? `/api/products/${encodeURIComponent(product.id)}/image` : null };
+    return { ...product, ...price, imageUrl: image ? trustedProductImage(product.imageUrl || imageHints.get(product.productUrl), product.productUrl)?.href ?? `/api/products/${encodeURIComponent(product.id)}/image` : null };
   }
   async function prepareProduct(product: ProductCandidate): Promise<ProductCandidate | null> {
     const productUrl = await resolveAmazonProductUrl(product.productUrl);
@@ -317,9 +322,9 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     // 不透明な検索出典を商品扱いしない。記事やQ&Aへの転送は候補から除く。
     return null;
   }
-  async function fetchResolvedProductImage(value: string): Promise<PreviewImage | null> {
+  async function fetchResolvedProductImage(value: string, imageHint?: string | null): Promise<PreviewImage | null> {
     const resolved = await resolveAmazonProductUrl(value);
-    return resolved ? fetchProductImage(resolved) : null;
+    return resolved ? fetchProductImage(resolved, imageHint) : null;
   }
   return { enrichProduct, fetchProductImage, resolveAmazonProductUrl, prepareProduct, fetchResolvedProductImage };
 }

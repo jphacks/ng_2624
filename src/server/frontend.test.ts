@@ -16,7 +16,7 @@ async function frontend(request:(path:string,method?:string,body?:any)=>Promise<
  const document:any={visibilityState:'visible',activeElement:null,querySelector:(id:string)=>nodes[id],addEventListener:(name:string,fn:any)=>{events[name]=fn;}};
  const context=vm.createContext({window,document,location,
  history:{pushState:(_:unknown,__:string,hash:string)=>{location.hash=hash;},replaceState:(_:unknown,__:string,hash:string)=>{location.hash=hash;}},
- sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm});
+ sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm,FormData:class {constructor(form:any){return form.entries;}}});
  vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat,checkPairingRequests,refreshVisible,inferGradeFromBirthDate};})();'),context);
  await new Promise(resolve=>setImmediate(resolve));
  return {...window.testing,nodes,events,location,window,document};
@@ -769,4 +769,36 @@ test('birthday fills grade once, honors manual choices, and keeps the marker acr
  Object.defineProperty(content,'innerHTML',{get:()=>html,set:(next:string)=>{replacements++;html=next;grade={...grade,dataset:{gradeInitialized:'false'}};}});
  balance=1;await ui.refreshVisible();assert.equal(replacements,1);assert.equal(grade.dataset.gradeInitialized,'true');
  grade.dataset.gradeInitialized='true';grade.value='4';ui.events.focusout({target:birth});assert.equal(grade.value,'4');
+});
+
+test('子どもの好きなことは複数選択し、既存の自由入力を残す',async()=>{
+ const ui=await frontend(async path=>{
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path==='/profile')return {displayName:'こども',profile:{preferences:{interests:['ゲーム','音楽','ロボット']}}};
+  return basic(path);
+ });
+ await ui.go('#settings');const html=ui.nodes['#content'].innerHTML;
+ assert.match(html,/type="checkbox" name="interestChoice" value="ゲーム" checked/);
+ assert.match(html,/type="checkbox" name="interestChoice" value="音楽" checked/);
+ assert.match(html,/name="interestOther"[^>]*value="ロボット"/);
+ assert.doesNotMatch(html,/1行に1つ|好きなことを更新できるよ/);
+});
+test('接続完了は適切なサイズのホーム導線に戻る',async()=>{
+ const ui=await frontend(basic);ui.state.invitation={childId:'child',connected:true};
+ await ui.go('#invitation/child');
+ assert.match(ui.nodes['#content'].innerHTML,/<a class="btn-pill home-return" href="#home">ホームへ戻る<\/a>/);
+});
+
+test('複数のチェックと自由入力をまとめてプロフィールへ保存する',async()=>{
+ let saved:any;
+ const ui=await frontend(async(path,method,body)=>{
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path==='/profile'&&method==='PATCH'){saved=body;return {};}
+  return basic(path);
+ });
+ const entries=new FormData();entries.append('interestChoice','ゲーム');entries.append('interestChoice','音楽');entries.append('interestOther','ロボット、 宇宙');
+ const form={dataset:{form:'child-profile'},entries,matches:()=>true,querySelectorAll:()=>[]};
+ ui.events.submit({target:{closest:()=>form},preventDefault(){}});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(Array.from(saved.profile.preferences.interests),['ゲーム','音楽','ロボット','宇宙']);
 });

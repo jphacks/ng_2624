@@ -931,3 +931,20 @@ test('a reason summary needs no promise or purchase condition',async()=>{
  const result=await createReply({...input(),mode:'consultation',negotiationHistory:[],sharedConditions:[],products:[product],selectedProductId:product.id}, {generate:async()=>draft({purchaseConditions:[]})});
  assert.equal(result.action,'PROPOSAL');assert.deepEqual(result.proposalDraft?.purchaseConditions,[]);
 });
+
+for(const code of ['API_ERROR','TIMEOUT','EMPTY_RESPONSE','INVALID_RESPONSE','RATE_LIMIT'] as const){
+ test(`理由のAI応答が${code}でも本人の言葉を確認用下書きに保つ`,async()=>{
+  const value={...input(),mode:'consultation' as const,sharedConditions:[],constraints:{mustHave:[],mustAvoid:[]},products:[product],selectedProductId:product.id,message:'かっこいい！'};
+  let calls=0;
+  const result=await createReply(value,{generate:async()=>{calls++;throw new ConversationError(code,'failure');}});
+  assert.equal(calls,1);assert.equal(result.action,'PROPOSAL');
+  if(result.action!=='PROPOSAL')throw Error('draft required');
+  assert.equal(result.proposalDraft.persuasionText,'かっこいい！');assert.equal(result.proposalDraft.productId,product.id);
+  assert.deepEqual(result.proposalDraft.purchaseConditions,[]);assert.equal(result.proposalDraft.basedOn,null);
+ });
+}
+test('AI応答失敗の補完でも価格・購入条件・共有交渉の制約を迂回しない',async()=>{
+ for(const change of [{constraints:{mustHave:['防水'],mustAvoid:[]}},{products:[{...product,priceJpy:null}]},{products:[{...product,priceCheckedAt:'2020-01-01T00:00:00Z'}]},{mode:'negotiation' as const},{currentProposal:proposal}]){
+  await assert.rejects(createReply({...input(),mode:'consultation',sharedConditions:[],constraints:{mustHave:[],mustAvoid:[]},products:[product],selectedProductId:product.id,message:'かっこいい！',...change},{generate:async()=>{throw new ConversationError('API_ERROR','failure');}}),hasCode('API_ERROR'));
+ }
+});

@@ -6,7 +6,7 @@ import { AppError, assert, text, uuid, integer, strings, date, randomToken, hash
 import type { Config, DB, Row } from './core.ts';
 import type { AIInput, AIOutput, ProductCandidate } from '../shared/types.ts';
 
-interface Dependencies { db: DB; ai: (input: AIInput) => Promise<AIOutput>; enrich: (product: ProductCandidate) => Promise<ProductCandidate | null>; image: (url: string) => Promise<{ body: Buffer; contentType: string } | null>; qr: (url: string) => Promise<string>; }
+interface Dependencies { db: DB; ai: (input: AIInput) => Promise<AIOutput>; enrich: (product: ProductCandidate) => Promise<ProductCandidate | null>; image: (url: string, imageHint?: string | null) => Promise<{ body: Buffer; contentType: string } | null>; qr: (url: string) => Promise<string>; }
 const DAY = 86400000;
 function aiFailure(error: unknown, fallback: string): AppError {
   if (error instanceof AppError) return error;
@@ -430,7 +430,7 @@ export function createApp(config: Config, dep: Dependencies) {
       if (imageRoute && method === 'GET') {
         const id = uuid(imageRoute[1]); let allowed = !!await one('conversations', { user_id: eq(user.id), products: `cs.${JSON.stringify([{ id }])}` }, false);
         if (!allowed) { const ps = await db.list('proposals', { product_id: eq(id), status: 'neq.draft', limit: '100' }); for (const p of ps) { try { await accessibleProposal(user, p.id); allowed = true; break; } catch {} } }
-        assert(allowed, 404, 'NOT_FOUND'); rate(`image:${user.id}`, 60, 60000); const p = await one('products', { id: eq(id) }); const image = await dep.image(p.product_url); assert(image, 404, 'NOT_FOUND', '画像を取得できません。');
+        assert(allowed, 404, 'NOT_FOUND'); rate(`image:${user.id}`, 60, 60000); const p = await one('products', { id: eq(id) }); const image = await dep.image(p.product_url, p.image_url); assert(image, 404, 'NOT_FOUND', '画像を取得できません。');
         responseHeaders.set('Content-Type', image.contentType); responseHeaders.set('Cache-Control', 'private, max-age=300'); return new Response(new Uint8Array(image.body), { headers: responseHeaders });
       }
       throw new AppError(404, 'NOT_FOUND', 'この操作は見つかりません。');

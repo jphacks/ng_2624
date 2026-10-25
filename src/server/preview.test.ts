@@ -64,7 +64,7 @@ test('Amazon search image goes straight to the verified CDN without fetching the
   const calls: string[] = [];
   const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => { calls.push(url.href); return pngResponse(); } });
   const candidate = { ...product, productUrl: 'https://www.amazon.co.jp/dp/B000000001', imageUrl: 'https://m.media-amazon.com/images/I/actual-product.png' };
-  assert.equal((await preview.enrichProduct(candidate)).imageUrl, '/api/products/product-1/image');
+  assert.equal((await preview.enrichProduct(candidate)).imageUrl, candidate.imageUrl);
   assert.deepEqual(calls, [candidate.imageUrl]);
   assert.deepEqual(await preview.fetchProductImage(candidate.productUrl), { body: png, contentType: 'image/png' });
   assert.equal(calls.length, 1);
@@ -153,7 +153,7 @@ test('one product HTML read restores actual JPY offer and image together', async
   const result = await preview.enrichProduct(candidate);
   assert.equal(result.priceJpy, 6980);
   assert.ok(result.priceCheckedAt && !Number.isNaN(Date.parse(result.priceCheckedAt)));
-  assert.equal(result.imageUrl, '/api/products/product-1/image');
+  assert.equal(result.imageUrl, 'https://m.media-amazon.com/images/I/game.png');
   await preview.enrichProduct(candidate);
   assert.equal(pageReads, 1);
 });
@@ -182,14 +182,14 @@ test('failed price lookup preserves a trusted native image hint', async () => {
   } });
   const result = await preview.enrichProduct({ ...product, priceJpy: null, productUrl: 'https://www.amazon.co.jp/dp/B000000001', imageUrl: 'https://m.media-amazon.com/images/I/game.png' });
   assert.equal(result.priceJpy, null);
-  assert.equal(result.imageUrl, '/api/products/product-1/image');
+  assert.equal(result.imageUrl, 'https://m.media-amazon.com/images/I/game.png');
 });
 
 test('JSON-LD Product image objects support link previews without OG tags', async () => {
   const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => url.hostname === 'www.amazon.co.jp'
     ? html('<script type="application/ld+json">{"@graph":[{"@type":"Product","image":{"url":"https://m.media-amazon.com/images/I/real.png"},"offers":{"priceCurrency":"JPY","price":7980}}]}</script>') : pngResponse() });
   const result = await preview.enrichProduct({ ...product, priceJpy: null, imageUrl: null, productUrl: 'https://www.amazon.co.jp/dp/B000000001' });
-  assert.equal(result.imageUrl, '/api/products/product-1/image');
+  assert.equal(result.imageUrl, 'https://m.media-amazon.com/images/I/real.png');
   assert.equal(result.priceJpy, 7980);
 });
 
@@ -202,6 +202,25 @@ test('販売店の検索カードから得た実画像を、商品HTMLの取得�
  }});
  const candidate={...product,priceJpy:59980,productUrl:'https://www.yodobashi.com/product/100000001009063421/',imageUrl};
  const enriched=await preview.prepareProduct(candidate);
- assert.equal(enriched?.imageUrl,'/api/products/product-1/image');assert.equal(enriched?.priceJpy,59980);assert.equal(pages,0);
+ assert.equal(enriched?.imageUrl,imageUrl);assert.equal(enriched?.priceJpy,59980);assert.equal(pages,0);
  assert.deepEqual(await preview.fetchResolvedProductImage(candidate.productUrl),{body:png,contentType:'image/png'});
+});
+
+ test('stored native image hint survives a fresh preview instance with product HTML unavailable',async()=>{
+ const candidate={...product,productUrl:'https://www.amazon.co.jp/dp/B000000001',imageUrl:'https://m.media-amazon.com/images/I/persisted.png'};
+ let pages=0;
+ const deps={resolve:async()=>[publicAddress],read:async(url:URL)=>{if(url.hostname==='www.amazon.co.jp'){pages++;throw Error('unavailable');}return pngResponse();}};
+ const saved=await createProductPreview(deps).enrichProduct(candidate);
+ assert.deepEqual(await createProductPreview(deps).fetchResolvedProductImage(saved.productUrl,saved.imageUrl),{body:png,contentType:'image/png'});
+ assert.equal(pages,0);
+});
+
+test('楽天の商品メタデータ画像も保存して、再起動後に商品ページを再取得せず表示する',async()=>{
+ const imageUrl='https://image.rakuten.co.jp/toyshop/cabinet/phone.png';
+ const candidate={...product,productUrl:'https://item.rakuten.co.jp/toyshop/phone/',imageUrl:null};
+ const saved=await createProductPreview({resolve:async()=>[publicAddress],read:async url=>url.hostname==='item.rakuten.co.jp'?html(`<meta property="og:image" content="${imageUrl}">`):pngResponse()}).enrichProduct(candidate);
+ assert.equal(saved.imageUrl,imageUrl);
+ let reads=0;
+ const fresh=createProductPreview({resolve:async()=>[publicAddress],read:async url=>{reads++;assert.equal(url.href,imageUrl);return pngResponse();}});
+ assert.deepEqual(await fresh.fetchResolvedProductImage(saved.productUrl,saved.imageUrl),{body:png,contentType:'image/png'});assert.equal(reads,1);
 });
