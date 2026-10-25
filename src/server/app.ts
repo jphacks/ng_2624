@@ -277,7 +277,7 @@ export function createApp(config: Config, dep: Dependencies) {
         if (childRoute[3] === 'settings' && method === 'GET') return result(await settings(id));
         if (childRoute[3] === 'settings' && method === 'PATCH') return result(await saveSettings(user, id, body));
         if (childRoute[3] === 'invitations' && method === 'POST') {
-          reauth(); rate(`invite:${user.id}`, 10, 600000);
+          rate(`invite:${user.id}`, 10, 600000);
           const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const token = [...randomBytes(12)].map(x => alphabet[x % 32]).join('');
           const inv = await db.rpc('wb_create_invitation', { p_actor_id: user.id, p_child_id: id, p_token_hash: hash(token) });
           const link = `${config.origin}/pairing#invitationToken=${token}`;
