@@ -340,9 +340,20 @@ export function createApp(config: Config, dep: Dependencies) {
       if (conversation) {
         const c = await ownedChat(user, conversation[1]);
         if (!conversation[3] && method === 'GET') return result(await chatView(user, c));
+        // Delete only private chats with no proposal; messages and AI requests cascade with the row.
+        if (!conversation[3] && method === 'DELETE') {
+          assert(!c.context_proposal_id, 409, 'INVALID_STATE', '交渉用のチャットは削除できません。');
+          assert(!(c.ai_lock_id && Date.parse(c.ai_lock_expires_at) > Date.now()), 409, 'INVALID_STATE', 'ぽぽが返事を作っています。終わってから削除してください。');
+          assert(!await one('proposals', { conversation_id: eq(c.id) }, false), 409, 'INVALID_STATE', '提案を作ったチャットは削除できません。「新しいチャット」で始め直してください。');
+          await db.remove('conversations', { id: eq(c.id), user_id: eq(user.id) });
+          return result({ conversationId: c.id, deleted: true });
+        }
         if (conversation[3] === 'start' && method === 'POST') return result(await chatView(user, await db.rpc('wb_start_consultation', { p_actor_id: user.id, p_conversation_id: c.id })));
         if (conversation[3] && method !== 'GET') assert(await db.rpc('wb_consultation_phase', { p_actor_id: user.id, p_conversation_id: c.id }) === 'consultation', 409, 'INVALID_STATE', '個別相談は開始前、回答待ち、または終了しています。');
-        if (conversation[3] === 'search' && method === 'POST') { const query = text(body.query, 300); return result(await runAI(user, c.id, `商品検索：${query}`, query)); }
+        if (conversation[3] === 'search' && method === 'POST') {
+          if (body.fromConversation === true) return result(await runAI(user, c.id, 'これまでの相談内容から、希望に近い商品の検索へ進んでください。検索語には商品名・用途だけを含め、名前や家庭の事情は含めないでください。'));
+          const query = text(body.query, 300); return result(await runAI(user, c.id, `商品検索：${query}`, query));
+        }
         if (conversation[3] === 'messages' && method === 'POST') return result(await runAI(user, c.id, text(body.message)));
         if (conversation[3] === 'selected-product' && method === 'PATCH') return result(await chatView(user, await db.rpc('wb_select_product', { p_actor_id: user.id, p_conversation_id: c.id, p_product_id: uuid(body.selectedProductId) })));
         if (conversation[3] === 'proposal-drafts' && method === 'POST') return result(await runAI(user, c.id, null));

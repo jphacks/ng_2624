@@ -18,32 +18,123 @@ const form=(action,body,submit='保存する',id='')=>`<form class="proposal-for
 const empty=text=>`<p class="empty-note">${esc(text)}</p>`;
 const labels={pending:'返事待ち',approved:'承認済み',rejected:'見送り・差し戻し',submitted:'確認待ち',completed:'完了',paid:'報酬反映済み',draft:'下書き',agreed:'合意済み',superseded:'更新済み',open:'相談中',active:'取り組み中',assigned:'取り組み中',available:'取り組み中',in_progress:'取り組み中',revision_requested:'修正依頼',closed:'終了',purchased:'購入済み',expired:'期限切れ'};
 const status=v=>labels[v]||v||'';
+// Child screens (home / chores) use hiragana labels instead of kanji.
+const kidLabels={pending:'へんじまち',approved:'OK！',rejected:'みおくり',submitted:'かくにんまち',completed:'おわり',paid:'ポイントもらったよ',draft:'したがき',agreed:'きまったよ',superseded:'あたらしくなったよ',open:'そうだんちゅう',active:'とりくみちゅう',assigned:'とりくみちゅう',available:'とりくみちゅう',in_progress:'とりくみちゅう',revision_requested:'なおしてね',closed:'おわり',purchased:'かったよ',expired:'きげんぎれ'};
+const kidStatus=v=>parent()?status(v):kidLabels[v]||status(v);
+const kid=(adult,child)=>parent()?adult:child;
+// Approved / rejected chores also get an icon on the child screen.
+const childChoreLabels={approved:['🎉','ごうかく！'],rejected:['😢','みおくり・さしもどし']};
+const choreLabel=v=>{const c=!parent()&&childChoreLabels[v];return c?`<span class="chore-status-icon" aria-hidden="true">${c[0]}</span>${esc(c[1])}`:esc(kidStatus(v));};
+const reloadBtn=()=>btn(parent()?'最新の状態に更新':'こうしん','reload');
+const choreTone=v=>['approved','completed','paid'].includes(v)?'is-approved':['rejected','revision_requested'].includes(v)?'is-rejected':v==='submitted'?'is-waiting':'';
 const state={session:null,childId:null,dashboard:null,chat:null,proposal:null,busy:false,epoch:0,dirty:false,routeHash:location.hash,invitation:null,goalOrder:[],pairingId:sessionStorage.getItem('pairingRequestId')};
 const parent=()=>state.session?.user?.role==='parent';
 function notice(text='',error=false){$('#notice').textContent=text;$('#notice').className=error?'global-notice form-error':'global-notice';}
-function render(html){state.dirty=false;$('#content').innerHTML=html;$('#content').setAttribute('aria-busy','false');}
-function nav(){ const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=`<a href="#home">ホーム</a><a href="#conversations">ぽぽに相談</a><a href="#settings">${parent()?'設定':'じぶんの設定'}</a>`; }
+function render(html){state.dirty=false;$('#content').classList?.remove('chat-layout-fixed-v2','chat-layout-v3');$('#content').innerHTML=html;$('#content').setAttribute('aria-busy','false');}
+function nav(){ const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=navLink('#home','home','ホーム')+navLink('#conversations','chat',kid('ぽぽに相談','ぽぽにそうだん'))+navLink('#settings','gear',parent()?'設定':'じぶんの設定'); }
+// Line icons for the bottom bar: house, hand, speech bubble, gear.
+const navIcons={
+ home:'<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+ hand:'<path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>',
+ chat:'<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+ gear:'<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'
+};
+const navLink=(href,icon,text)=>`<a href="${href}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${navIcons[icon]}</svg><span>${esc(text)}</span></a>`;
 function product(p,action=''){
  if(!p)return '';const src=image(p.imageUrl),target=url(p.productUrl);
- return `<article class="product-card"><div class="product-visual">${src?`<img class="product-image" src="${esc(src)}" alt="${esc(p.name)}" loading="lazy" referrerpolicy="no-referrer"><span class="image-fallback" hidden>画像を取得できません</span>`:'<span class="image-fallback">画像を取得できません</span>'}</div><div class="product-info"><h3 class="product-name">${esc(p.name)}</h3><p class="product-price">${p.priceJpy==null?'価格は保護者と確認':points(p.priceJpy)}</p><p class="product-reason">${esc(p.recommendationReason||p.description||'')}</p>${parent()&&target?`<a class="product-link" href="${esc(target)}" target="_blank" rel="noopener noreferrer">販売元で確認 ↗</a>`:''}${action?btn('この商品を選ぶ',action,p.id):''}</div></article>`;
+ return `<article class="product-card"><div class="product-visual">${src?`<img class="product-image" src="${esc(src)}" alt="${esc(p.name)}" loading="lazy" referrerpolicy="no-referrer"><span class="image-fallback" hidden>${kid('画像を取得できません','しゃしんを ひょうじできません')}</span>`:`<span class="image-fallback">${kid('画像を取得できません','しゃしんを ひょうじできません')}</span>`}</div><div class="product-info"><h3 class="product-name">${esc(p.name)}</h3><p class="product-price">${p.priceJpy==null?kid('価格は保護者と確認','ねだんは おうちのひとと かくにんしてね'):points(p.priceJpy)}</p><p class="product-reason">${esc(p.recommendationReason||p.description||'')}</p>${parent()&&target?`<a class="product-link" href="${esc(target)}" target="_blank" rel="noopener noreferrer">販売元で確認 ↗</a>`:''}${action?btn('この商品を選ぶ',action,p.id):''}</div></article>`;
 }
 function welcome(){nav();render(`<div class="welcome"><span class="welcome-label">きみの「できた！」が、羽ばたく。</span><div class="welcome-dove dove" aria-hidden="true"></div><h1 class="tagline">がんばりと「ほしい」を、<br>親子でつなぐ。</h1></div><div class="start-actions"><a class="btn-start btn-start-parent login-link" href="/api/auth/google/start">🏡 Googleで保護者ログイン</a><details><summary>🌱 子どもの端末をつなぐ</summary><p>おうちの人から招待コードを受け取るか、招待QRを読み取ってください。</p>${form('pair-code',field('招待コード','invitationToken','','text',true),'接続をお願いする')}</details>${state.pairingId?btn('接続申請の続きを確認','pairing-check'):''}</div>`);}
 function selector(children){return children?.length?`<label class="field-label">子ども<select id="child-selector">${children.map(c=>`<option value="${esc(c.childId)}" ${c.childId===state.childId?'selected':''}>${esc(c.displayName)}</option>`).join('')}</select></label>`:'';}
-function goals(d){const list=(d.goals||[]).filter(g=>g.status!=='purchased'),initial=[...list].sort((a,b)=>({large:0,medium:1,small:2}[a.size]??3)-({large:0,medium:1,small:2}[b.size]??3));state.goalOrder=state.goalOrder.filter(id=>list.some(g=>g.id===id));for(const item of initial)if(!state.goalOrder.includes(item.id))state.goalOrder.push(item.id);const ordered=state.goalOrder.map(id=>list.find(g=>g.id===id)),g=ordered[0];if(!g)return empty('親子で商品提案に合意すると、目標がここに届きます。');return `<article class="goal-main">${product({...g,priceJpy:g.targetAmountYen})}<p>あと ${points(Math.max(0,g.targetAmountYen-d.balanceYen))}</p><p>${d.balanceYen>=g.targetAmountYen?'目標に届きました！':d.weeklyPaceYen>0?'最近のペースなら、あと約'+num(Math.ceil((g.targetAmountYen-d.balanceYen)*7/d.weeklyPaceYen))+'日（目安）':'お手伝いの実績がたまると、達成までの目安が出ます。'}</p><progress max="${Math.max(1,g.targetAmountYen)}" value="${Math.min(d.balanceYen,g.targetAmountYen)}" aria-label="目標までの進み具合"></progress>${parent()?btn('購入済みにする','purchase',g.id):''}</article><div class="goal-subs">${ordered.slice(1,3).map(x=>`<button type="button" class="goal-sub" data-action="feature-goal" data-id="${esc(x.id)}">${image(x.imageUrl)?`<img src="${esc(image(x.imageUrl))}" alt="" loading="lazy">`:''}<span>${esc(x.name)}<br>${points(x.targetAmountYen)}</span></button>`).join('')}</div>`;}
+function goals(d){const list=(d.goals||[]).filter(g=>g.status!=='purchased'),initial=[...list].sort((a,b)=>({large:0,medium:1,small:2}[a.size]??3)-({large:0,medium:1,small:2}[b.size]??3));state.goalOrder=state.goalOrder.filter(id=>list.some(g=>g.id===id));for(const item of initial)if(!state.goalOrder.includes(item.id))state.goalOrder.push(item.id);const ordered=state.goalOrder.map(id=>list.find(g=>g.id===id)),g=ordered[0];if(!g)return empty(parent()?'親子で商品提案に合意すると、目標がここに届きます。':'おやごさんがりょうかいしてくれると、もくひょうがここに表示されます。');return `<article class="goal-main">${product({...g,priceJpy:g.targetAmountYen})}<p>あと ${points(Math.max(0,g.targetAmountYen-d.balanceYen))}</p><p>${d.balanceYen>=g.targetAmountYen?kid('目標に届きました！','もくひょうに とどいたよ！'):d.weeklyPaceYen>0?kid('最近のペースなら、あと約'+num(Math.ceil((g.targetAmountYen-d.balanceYen)*7/d.weeklyPaceYen))+'日（目安）','いまのペースなら、あと '+num(Math.ceil((g.targetAmountYen-d.balanceYen)*7/d.weeklyPaceYen))+'にちくらい'):kid('お手伝いの実績がたまると、達成までの目安が出ます。','おてつだいを つづけると、あと なんにちで とどくか わかるよ。')}</p><progress max="${Math.max(1,g.targetAmountYen)}" value="${Math.min(d.balanceYen,g.targetAmountYen)}" aria-label="${kid('目標までの進み具合','もくひょうまでの すすみぐあい')}"></progress>${parent()?btn('購入済みにする','purchase',g.id):''}</article><div class="goal-subs">${ordered.slice(1,3).map(x=>`<button type="button" class="goal-sub" data-action="feature-goal" data-id="${esc(x.id)}">${image(x.imageUrl)?`<img src="${esc(image(x.imageUrl))}" alt="" loading="lazy">`:''}<span>${esc(x.name)}<br>${points(x.targetAmountYen)}</span></button>`).join('')}</div>`;}
+async function dashboard(){const d=await api('/dashboard'+(state.childId?'?childId='+encodeURIComponent(state.childId):''));state.dashboard=d;state.childId=d.childId;return d;}
+const childName=d=>d.children?.find(c=>c.childId===d.childId)?.displayName||'子ども';
+const noChild=d=>parent()&&!d.childId?empty('子ども一覧から子どもを登録してください。'):'';
+// Home shows only the points and the wish list.
 async function home(){
- const d=await api('/dashboard'+(state.childId?'?childId='+encodeURIComponent(state.childId):''));state.dashboard=d;state.childId=d.childId;
- render(`<h1 class="page-title">${esc(parent()?d.children?.find(c=>c.childId===d.childId)?.displayName||'子ども':state.session.user.displayName)}${parent()?'の目標・お手伝い':'、おかえり！'}</h1>${parent()?selector(d.children):''}${parent()&&!d.childId?empty('子ども一覧から子どもを登録してください。'):''}<div class="points-oval"><span class="points-label">ありがとうポイント</span><span class="points-value">${num(d.balanceYen)}<small>pt</small></span></div><p class="pace">1ポイント＝1円 ・${parent()?'これまで ':'累計：'}${points(d.lifetimeEarnedYen)}${parent()?`<br>最近の週平均：${points(d.weeklyPaceYen)}`:''}</p><section class="goals"><h2>${parent()?'子どもの目標':'ほしいもの'}</h2>${goals(d)}</section><section class="tasks"><h2>お手伝い</h2>${(d.chores||[]).map(c=>`<article class="flow-card"><h3>${esc(c.title)}</h3><p>${esc(c.description)}</p><strong>${points(c.rewardAmountYen)}</strong><p>${esc(status(c.status))} ・${esc(date(c.dueAt))}</p>${c.submissionNote?`<p>完了報告：${esc(c.submissionNote)}</p>`:''}${c.reviewComment?`<p>${parent()?'確認コメント':'おうちの人から'}：${esc(c.reviewComment)}</p>`:''}${!parent()&&['assigned','rejected'].includes(c.status)?form('submit-chore',area('できたこと（任意）','note'),'完了を報告する',c.id):''}${parent()&&c.status==='submitted'?form('review-chore',`<label>確認結果<select name="decision"><option value="approved">完了を承認し、ポイントを渡す</option><option value="rejected">やり直しをお願いする</option></select></label>${area('ひとこと（差し戻し時は必須）','reason')}`,'この内容で返事する',c.id):''}</article>`).join('')||empty('お手伝いはまだありません。')}${d.childId?(parent()?`<details><summary>＋ お手伝いをお願いする</summary>${form('create-chore',field('やること','title','','text',true)+area('説明','description')+field('ありがとうポイント（10単位）','rewardAmountYen','','number',true)+field('期限（任意）','dueAt','','date'),'依頼する')}</details>`:form('create-request',field('やってみたいお手伝い','title','','text',true)+area('ひとこと','note'),'おうちの人に提案する')):''}</section><section><h2>お手伝いの提案</h2>${(d.choreRequests||[]).map(r=>`<article class="flow-card"><h3>${esc(r.title)}</h3><p>${esc(r.note)}</p><p>${esc(status(r.status))}${r.rewardAmountYen!=null?' ・'+points(r.rewardAmountYen):''}</p>${r.reason?`<p>${esc(r.reason)}</p>`:''}${parent()&&r.status==='pending'?form('respond-request',`<label>返事<select name="decision"><option value="approved">条件を決めてお願いする</option><option value="rejected">今回は見送る</option></select></label>${field('やること','title',r.title,'text',true)}${field('ありがとうポイント（10単位）','rewardAmountYen','','number')}${field('期限（任意）','dueAt','','date')}${area('理由（見送り時は必須）','reason')}`,'返事する',r.id):''}</article>`).join('')||empty('お手伝いの提案はまだありません。')}</section><section><h2>商品の提案</h2>${(d.proposals||[]).map(v=>`<article class="flow-card">${product(v.product)}<p>${esc(status(v.proposal.status))} ・第${v.proposal.version}版</p>${btn('提案を確認','proposal',v.proposal.id)}</article>`).join('')||empty('商品の提案はまだありません。')}</section>${btn('最新の状態に更新','reload')}`);
+ const d=await dashboard();
+ render(`<h1 class="page-title">${esc(parent()?childName(d):state.session.user.displayName)}${parent()?'の目標・お手伝い':'、おかえり！'}</h1>${parent()?selector(d.children):''}${noChild(d)}<div class="points-oval"><span class="points-label">ありがとうポイント</span><span class="points-value">${num(d.balanceYen)}<small>pt</small></span></div><p class="pace">${kid('1ポイント＝1円 ・これまで ','1ポイント＝1えん ・これまでに もらった：')}${points(d.lifetimeEarnedYen)}${parent()?`<br>最近の週平均：${points(d.weeklyPaceYen)}`:''}</p><section class="goals"><h2>${parent()?'子どもの目標':'ほしいもの'}</h2>${goals(d)}</section><a class="btn-pill login-link" href="#chores">${kid('お手伝いを確認する','おてつだいを みる')}</a>${reloadBtn()}`);
+}
+// Chores, chore requests and product proposals live on their own screen.
+async function chores(){
+ const d=await dashboard();
+ render(`<h1 class="page-title">${parent()?esc(childName(d))+'のお手伝い':'おてつだい'}</h1>${parent()?selector(d.children):''}${noChild(d)}<section class="tasks"><h2>${kid('お手伝い','おてつだい')}</h2>${(d.chores||[]).map(c=>`<article class="flow-card chore-card ${choreTone(c.status)}"><span class="chore-status">${choreLabel(c.status)}</span><h3>${esc(c.title)}</h3><p>${esc(c.description)}</p><strong>${points(c.rewardAmountYen)}</strong>${c.dueAt?(parent()?`<p>期限 ${esc(date(c.dueAt))}</p>`:`<p>きげん ${esc(date(c.dueAt))} まで</p>`):''}${c.submissionNote?`<p>${kid('完了報告','できたこと')}：${esc(c.submissionNote)}</p>`:''}${c.reviewComment?`<p>${parent()?'確認コメント':'おうちのひとから'}：${esc(c.reviewComment)}</p>`:''}${!parent()&&['assigned','rejected'].includes(c.status)?form('submit-chore',area('できたこと（かかなくてもOK）','note'),'できた！を しらせる',c.id):''}${parent()&&c.status==='submitted'?form('review-chore',`<label>確認結果<select name="decision"><option value="approved">完了を承認し、ポイントを渡す</option><option value="rejected">やり直しをお願いする</option></select></label>${area('ひとこと（差し戻し時は必須）','reason')}`,'この内容で返事する',c.id):''}</article>`).join('')||empty(kid('お手伝いはまだありません。','おてつだいは まだ ないよ。'))}${d.childId?(parent()?`<details><summary>＋ お手伝いをお願いする</summary>${form('create-chore',field('やること','title','','text',true)+area('説明','description')+field('ありがとうポイント（10単位）','rewardAmountYen','','number',true)+field('期限（任意）','dueAt','','date'),'依頼する')}</details>`:form('create-request',field('やってみたいおてつだい','title','','text',true)+area('ひとこと','note'),'おうちのひとに つたえる')):''}</section><section><h2>${kid('お手伝いの提案','やってみたい おてつだい')}</h2>${(d.choreRequests||[]).map(r=>`<article class="flow-card"><h3>${esc(r.title)}</h3><p>${esc(r.note)}</p><p>${esc(kidStatus(r.status))}${r.rewardAmountYen!=null?' ・'+points(r.rewardAmountYen):''}</p>${r.reason?`<p>${esc(r.reason)}</p>`:''}${parent()&&r.status==='pending'?form('respond-request',`<label>返事<select name="decision"><option value="approved">条件を決めてお願いする</option><option value="rejected">今回は見送る</option></select></label>${field('やること','title',r.title,'text',true)}${field('ありがとうポイント（10単位）','rewardAmountYen','','number')}${field('期限（任意）','dueAt','','date')}${area('理由（見送り時は必須）','reason')}`,'返事する',r.id):''}</article>`).join('')||empty(kid('お手伝いの提案はまだありません。','まだ ないよ。'))}</section><section><h2>${kid('商品の提案','ほしいものの おねがい')}</h2>${(d.proposals||[]).map(v=>`<article class="flow-card">${product(v.product)}<p>${esc(kidStatus(v.proposal.status))} ・${kid('第'+v.proposal.version+'版',v.proposal.version+'かいめ')}</p>${btn(kid('提案を確認','みてみる'),'proposal',v.proposal.id)}</article>`).join('')||empty(kid('商品の提案はまだありません。','まだ ないよ。'))}</section>${reloadBtn()}`);
 }
 async function conversations(){
  let children=[];
  if(parent()){
   children=(await api('/children')).children;
-  if(!children.some(c=>c.childId===state.childId)){state.childId=children[0]?.childId||null;state.goalOrder=[];}
-  if(!state.childId){render('<h1>ぽぽに相談</h1><p>先に子ども一覧から子どもを登録してください。</p><a href="#children">子ども一覧へ</a>');return;}
+  if(!children.some(c=>c.childId===state.childId)){
+   state.childId=children[0]?.childId||null;
+   state.goalOrder=[];
+  }
+  if(!state.childId){
+   render('<h1>ぽぽに相談</h1><p>先に子どもを登録してください。</p><a href="#children">子ども一覧へ</a>');
+   return;
+  }
  }
- const [d,n]=await Promise.all([api('/conversations'+(parent()?'?childId='+encodeURIComponent(state.childId):'')),api('/negotiations')]);
- render(`${parent()?selector(children):''}<h1>ぽぽに相談</h1><p>個別相談は本人だけ、共有交渉は参加する親子に表示されます。${parent()?'お手伝いの依頼・承認は、子ども一覧の「目標・お手伝いを確認」から行います。':'お手伝いの報告はホームで行います。'}</p><h2>個別相談</h2>${btn('新しい個別相談を準備する','new-chat')}${(d.conversations||[]).map(c=>`<article class="flow-card"><p>${esc(date(c.updatedAt))}</p>${btn('個別相談を開く','open-chat',c.conversationId)}</article>`).join('')||empty('まだ個別相談はありません。')}<h2>共有交渉</h2><p>提案へのNo・修正依頼で開始します。最初の提案への賛成なら交渉は不要です。</p>${(n.negotiations||[]).filter(x=>!parent()||x.childId===state.childId).map(x=>`<article class="flow-card"><p>${esc(status(x.status))}</p>${btn('共有交渉を開く','open-negotiation',x.negotiationId)}</article>`).join('')||empty('共有交渉はまだありません。')}`);
+
+ const [d,n]=await Promise.all([
+  api('/conversations'+(parent()?'?childId='+encodeURIComponent(state.childId):'')),
+  api('/negotiations')
+ ]);
+
+ const conversations=[...(d.conversations||[])].sort(
+  (a,b)=>new Date(b.updatedAt||0)-new Date(a.updatedAt||0)
+ );
+ const negotiations=(n.negotiations||[]).filter(
+  x=>!parent()||x.childId===state.childId
+ );
+
+ state.chatThreads={conversations,negotiations,children};
+
+ const latest=conversations[0];
+
+ if(latest){
+  const id=encodeURIComponent(latest.conversationId);
+  const detail=await api('/conversations/'+id);
+  return chat(latest.conversationId);
+ }
+
+ const created=await api(
+  '/conversations',
+  'POST',
+  parent()&&state.childId?{childId:state.childId}:{}
+ );
+ const id=encodeURIComponent(created.conversationId);
+ return chat(created.conversationId);
 }
+
+function chatSwitcher(){
+ const threads=state.chatThreads;
+ if(!threads)return '';
+
+ const personal=threads.conversations.map(
+  (c,i)=>btn(
+   i===0?'最近の相談':'過去の相談 '+(i+1),
+   'open-chat',
+   c.conversationId
+  )
+ ).join('');
+
+ const shared=threads.negotiations.map(
+  (n,i)=>btn(
+   '親子で共有するチャット '+(i+1),
+   'open-negotiation',
+   n.negotiationId
+  )
+ ).join('');
+
+ return `<details class="chat-switcher">
+  <summary>チャットを切り替える</summary>
+  <p>個別相談は本人だけに表示されます。共有チャットは親子に公開されます。</p>
+  ${parent()?selector(threads.children):''}
+  ${btn('新しい個別相談を準備する','new-chat')}
+  ${personal}
+  ${shared||'<p>共有チャットはまだありません。</p>'}
+ </details>`;
+}
+
 const chatPath=()=>state.chat.mode==='negotiation'?'/negotiations/'+path(state.chat.negotiationId):'/conversations/'+path(state.chat.conversationId);
 function chatMessage(m){
  const assistant=m.sender==='assistant', own=m.own??m.sender==='user';
@@ -56,9 +147,15 @@ function renderChat(d){
  const shared=d.mode==='negotiation', active=d.canMessage===true;
  const intro=shared?'ぽぽです。ここでは、この商品の購入条件を親子で話し合います。ここへの発言と返答は親子に公開されます。個別相談の履歴は共有しません。':parent()?'ぽぽです。お子さんの目標に関する予算や購入条件を一緒に整理します。この個別相談はあなたにだけ表示されます。':'ぽぽだよ。ほしいものや、その理由を一緒に整理しよう。この個別相談はあなたにだけ見えるよ。';
  const phaseLabel={not_started:'開始前',consultation:'個別相談中',negotiation:'共有交渉中',awaiting_response:'提案への返事待ち',closed:'終了'}[d.phase]||'閲覧のみ';
- render(`<a class="back-link" href="#conversations">← 相談・交渉一覧</a><div class="chat-intro"><span class="dove" aria-hidden="true"></span><div><h1>${shared?'ぽぽと共有交渉':'ぽぽと個別相談'}</h1><p>${esc(phaseLabel)}</p></div></div><div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${d.messages.map(chatMessage).join('')}</div>${shared&&d.proposalView?.negotiationResult?.reason?`<p class="flow-card">No・修正依頼の理由：${esc(d.proposalView.negotiationResult.reason)}</p>`:''}${d.phase==='not_started'?`<p>内容と公開範囲を確認してから開始してください。</p>${btn('個別相談を開始する','start-chat')}`:''}${active?form('message',area(shared?'親子に公開するメッセージ':'ぽぽへのメッセージ','message','',true),'送信する'):empty(d.phase==='awaiting_response'?'相手の返事を待っています。このフェーズではメッセージを送れません。':d.phase==='closed'?'この相談・交渉は終了しました。履歴だけ確認できます。':d.phase==='negotiation'&&!shared?'個別相談は終了しました。続きは共有交渉で話し合ってください。':'')}${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${active&&!shared?`<details><summary>商品を探す・探し直す</summary><p>商品名や用途だけを入力してください。名前や家庭の事情は書かないでください。</p>${form('search-products',field('商品名・用途（例：ケーキ, かっこいい服）','query','','text',true),'この内容で商品を探す')}</details>`:''}${d.products?.length?`<section class="product-list">${d.products.map(p=>product(p,active?'select-product':'')).join('')}</section>`:''}${active&&d.selectedProductId?`<p>選択中：${esc(d.products.find(p=>p.id===d.selectedProductId)?.name||'')}</p>${btn(shared?'修正提案の下書きを作る':'この商品の提案を作る','generate-proposal')}`:''}${d.draftProposal?btn('自分の下書きを確認・編集する','proposal',d.draftProposal.id):''}${d.currentProposal?btn(shared?'対象の提案を確認する':'保存済みの提案を確認する','proposal',d.currentProposal.id):''}`);
+ render(`${parent()&&state.chatThreads?.children?.length?`<div class="chat-child-toggle" role="group" aria-label="子どもを選択">${state.chatThreads.children.map(c=>`<button type="button" data-action="select-chat-child" data-id="${esc(c.childId)}" aria-pressed="${c.childId===state.childId}">${esc(c.displayName)}</button>`).join('')}</div>`:''}<div class="chat-intro"><span class="dove" aria-hidden="true"></span><div><h1>ぽぽとチャット</h1><p>${shared?'親子に公開されるチャット':'あなただけのチャット'} ・ ${esc(phaseLabel)}</p></div><div class="chat-intro-actions"><button type="button" class="btn-pill new-chat-btn" data-action="new-chat">${esc(kid('＋ 新しいチャット','＋ あたらしく はなす'))}</button>${!shared&&d.conversationId&&!d.currentProposal&&!d.draftProposal?`<button type="button" class="btn-pill new-chat-btn delete-chat-btn" data-action="delete-chat" data-id="${esc(d.conversationId)}">${esc(kid('🗑 このチャットを削除','🗑 このチャットを けす'))}</button>`:''}</div></div><div class="chat-scroll-area"><div class="chat-log">${chatMessage({sender:'assistant',content:intro})}${(d.messages ?? []).map(chatMessage).join('')}</div>${shared&&d.proposalView?.negotiationResult?.reason?`<p class="flow-card">No・修正依頼の理由：${esc(d.proposalView.negotiationResult.reason)}</p>`:''}${!shared&&d.phase==='negotiation'&&d.negotiationId?btn('共有交渉へ進む','open-negotiation',d.negotiationId):''}${d.products?.length?`<section class="product-list">${d.products.map(p=>product(p,active?'select-product':'')).join('')}</section>`:''}${active&&d.selectedProductId?`<p>選択中：${esc(d.products.find(p=>p.id===d.selectedProductId)?.name||'')}</p>${btn(shared?'修正提案の下書きを作る':'この商品の提案を作る','generate-proposal')}`:''}${d.draftProposal?btn('自分の下書きを確認・編集する','proposal',d.draftProposal.id):''}${d.currentProposal?btn(shared?'対象の提案を確認する':'保存済みの提案を確認する','proposal',d.currentProposal.id):''}</div><div class="chat-fixed-footer">${active&&!shared?`${btn('🔎 そろそろ商品を探す','search-product-now')}`:''}${active?form('message',area(shared?'親子に公開するメッセージ':'ぽぽへのメッセージ','message','',true),'送信する'):empty(d.phase==='awaiting_response'?'相手の返事を待っています。このフェーズではメッセージを送れません。':d.phase==='closed'?'この相談・交渉は終了しました。履歴だけ確認できます。':d.phase==='negotiation'&&!shared?'個別相談は終了しました。続きは共有交渉で話し合ってください。':'')}</div>`);
+ $('#content').classList?.add('chat-layout-v3');
 }
-async function chat(id){renderChat(await api('/conversations/'+encodeURIComponent(id)));}
+async function chat(id){
+ const key=encodeURIComponent(id);
+ let detail=await api('/conversations/'+key);
+ if(detail.phase==='not_started')detail=await api('/conversations/'+key+'/start','POST',{});
+ renderChat(detail);
+}
 async function negotiation(id){renderChat(await api('/negotiations/'+encodeURIComponent(id)));}
 async function proposal(id){const v=await api('/proposals/'+encodeURIComponent(id)),p=v.proposal;state.proposal=v;const prod=v.product||state.chat?.products?.find(x=>x.id===p.productId)||state.dashboard?.proposals?.find(x=>x.proposal.id===id)?.product;render(`<a class="back-link" href="#home">← ${parent()?'子ども一覧':'ホーム'}</a><h1>商品の提案</h1>${product(prod)}<p>${esc(status(p.status))} ・第${p.version}版</p>${p.status==='draft'&&v.canEdit!==false?form('edit-proposal',area('お願いのことば','persuasionText',p.persuasionText,true)+area('やくそく（1行に1つ）','purchaseConditions',p.purchaseConditions.join('\n')),'下書きを保存する',p.id)+btn('この内容を相手に送る','send-proposal',p.id):`<div class="review-text">${esc(p.persuasionText)}</div><ul>${p.purchaseConditions.map(c=>`<li>${esc(c)}</li>`).join('')}</ul>`}${p.status==='pending'&&v.canRespond?form('respond-proposal',`<label>返事<select name="decision"><option value="approved">この内容に賛成する</option><option value="revision_requested">修正をお願いする</option><option value="rejected">見送る</option></select></label>${area('理由（修正・見送り時は必須）','reason')}`,'第'+p.version+'版に返事する',p.id):''}${v.negotiationResult?.reason?`<p>返事：${esc(v.negotiationResult.reason)}</p>`:''}${v.canConsult?btn('共有交渉へ進む','consult-proposal',p.id):''}${['agreed','superseded'].includes(p.status)?'<p>この提案の相談・交渉は終了しています。</p>':''}`);}
 const gender=(value=null)=>`<label class="field-label">性別<select name="gender"><option value="">回答しない</option><option value="male" ${value==='male'?'selected':''}>男性</option><option value="female" ${value==='female'?'selected':''}>女性</option><option value="other" ${value==='other'?'selected':''}>その他</option></select></label>`;
@@ -73,7 +170,7 @@ async function settings(){if(!parent()){const p=await api('/profile');return ren
 function invitation(id){const d=state.invitation;if(!d||d.childId!==id)return render(`<a href="#children">← 子ども一覧</a><p>招待を表示するには、子ども一覧から招待を発行してください。</p>`);const src=typeof d.qrDataUrl==='string'&&d.qrDataUrl.startsWith('data:image/png;base64,')?d.qrDataUrl:'';render(`<a href="#children">← 子ども一覧</a><h1>子どもの端末をつなぐ</h1><p>子どもの端末でQRを読み取るか、最初の画面で招待コードを入力してください。</p>${src?`<img class="pair-qr" src="${esc(src)}" alt="子どもの端末で読み取る招待QR">`:''}<p class="confirmation-code">${esc(d.invitationToken)}</p><p>期限：${esc(date(d.expiresAt))}</p><p>接続申請が届いたら、設定画面で確認番号を照合して承認してください。</p><a class="btn-pill" href="#settings">接続申請を確認する</a>`);}
 async function pair(token){if(state.session?.authenticated)throw new Error('ログイン中です。子どもの別端末または別ブラウザーで招待を開いてください。');token=token.normalize('NFKC').replace(/[\s-]/g,'').toUpperCase();if(!/^[A-Z2-9]{12}$/.test(token))throw new Error('招待コードは12文字の英数字です。6桁の確認番号とは異なります。');await api('/pairing/session','POST',{invitationToken:token});const p=await api('/pairing/requests','POST',{invitationToken:token});state.pairingId=p.pairingRequestId;sessionStorage.setItem('pairingRequestId',p.pairingRequestId);pairView(p);}
 function pairView(p){render(`<h1>おうちの人に確認してもらおう</h1><p>${esc(p.childDisplayName)}の端末として接続します。</p><p class="confirmation-code">${esc(p.confirmationCode)}</p><p>① おうちの人が「設定」でこの6桁の番号を入力し、承認します。<br>② 下のボタンで返事を確認し、「接続を完了する」を押してください。</p><p>${esc(status(p.status))} ・期限 ${esc(date(p.expiresAt))}</p>${p.status==='approved'?btn('接続を完了する','pairing-complete'):p.status==='pending'?btn('おうちの人の返事を確認','pairing-check'):'<a href="#start">新しい招待ではじめる</a>'}`);}
-async function route(){notice();nav();if(!state.session?.authenticated){if(state.pairingId&&location.hash==='#pairing'){await api('/pairing/session','POST',{});return pairView(await api('/pairing/requests/'+encodeURIComponent(state.pairingId)));}return welcome();}if(state.session.user.onboardingCompleted===false)return onboarding();const [view,id]=location.hash.slice(1).split('/');if(view==='conversations')return conversations();if(view==='conversation'&&id)return chat(id);if(view==='negotiation'&&id)return negotiation(id);if(view==='proposal'&&id)return proposal(id);if(view==='child-home'&&id&&parent()){if(state.childId!==id)state.goalOrder=[];state.childId=id;return home();}if(view==='children')return children();if(view==='child-settings'&&id&&parent())return childSettings(id);if(view==='settings')return settings();if(view==='invitation'&&id&&parent())return invitation(id);return parent()?children():home();}
+async function route(){notice();nav();if(!state.session?.authenticated){if(state.pairingId&&location.hash==='#pairing'){await api('/pairing/session','POST',{});return pairView(await api('/pairing/requests/'+encodeURIComponent(state.pairingId)));}return welcome();}if(state.session.user.onboardingCompleted===false)return onboarding();const [view,id]=location.hash.slice(1).split('/');if(view==='chores')return chores();if(view==='conversations')return conversations();if(view==='conversation'&&id)return chat(id);if(view==='negotiation'&&id)return negotiation(id);if(view==='proposal'&&id)return proposal(id);if(view==='child-home'&&id&&parent()){if(state.childId!==id)state.goalOrder=[];state.childId=id;return home();}if(view==='children')return children();if(view==='child-settings'&&id&&parent())return childSettings(id);if(view==='settings')return settings();if(view==='invitation'&&id&&parent())return invitation(id);return parent()?children():home();}
 function canLeave(){return !state.dirty||confirm('提案の編集内容が未保存です。保存せず移動しますか？');}
 async function go(hash){if(!canLeave())return;history.pushState(null,'',hash);return navigate();}
 async function navigate(preserveScroll=false){state.routeHash=location.hash;const epoch=++state.epoch,position=preserveScroll?{left:window.scrollX,top:window.scrollY,behavior:'instant'}:null;if(!preserveScroll)render('<p>読み込んでいます…</p>');try{await route();if(position&&epoch===state.epoch)window.scrollTo(position);}catch(e){if(!e.stale)await error(e);}}
@@ -103,12 +200,20 @@ async function action(a,id){
  if(a==='invite'){state.invitation=await api('/children/'+path(id)+'/invitations','POST',{});return go('#invitation/'+id);}
  if(a==='feature-goal'){const i=state.goalOrder.indexOf(id);if(i>0)[state.goalOrder[0],state.goalOrder[i]]=[state.goalOrder[i],state.goalOrder[0]];const section=$('.goals');if(section)section.innerHTML='<h2>ほしいもの</h2>'+goals(state.dashboard);return;}
  if(a==='purchase'){const g=state.dashboard.goals.find(x=>x.id===id);if(!confirm(`${g.name}を購入済みにして、${points(g.targetAmountYen)}を残高から引きますか？`))return;await api('/goals/'+path(id)+'/purchase','POST',{});await home();return notice('購入を記録しました。');}
- if(a==='new-chat'){const d=await api('/conversations','POST',parent()&&state.childId?{childId:state.childId}:{});return go('#conversation/'+d.conversationId);}
+ if(a==='select-chat-child'){state.childId=id;state.goalOrder=[];return go('#conversations');}
+ if(a==='new-chat'){if(!confirm(kid('新しいチャットを始めます。今までの会話は画面から消え、ぽぽにも引き継がれません。よろしいですか？','あたらしく はなしを はじめるよ。いままでの おはなしは みえなくなるけど いい？')))return;const d=await api('/conversations','POST',parent()&&state.childId?{childId:state.childId}:{});return go('#conversation/'+d.conversationId);}
+ if(a==='delete-chat'){if(!confirm(kid('このチャットの会話をすべて削除します。元に戻せません。よろしいですか？','この おはなしを ぜんぶ けすよ。もとに もどせないけど いい？')))return;await api('/conversations/'+path(id),'DELETE');await go('#conversations');return notice(kid('チャットを削除しました。','チャットを けしたよ。'));}
  if(a==='open-negotiation')return go('#negotiation/'+id);
  if(a==='start-chat')return renderChat(await api(chatPath()+'/start','POST',{}));
  if(a==='open-chat')return go('#conversation/'+id);
  if(a==='proposal')return go('#proposal/'+id);
  if(a==='consult-proposal'){const d=await api('/proposals/'+path(id));if(!d.canConsult)throw new Error('共有交渉は開始前、回答待ち、または終了しています。');return go('#negotiation/'+d.negotiationId);}
+ if(a==='search-product-now'){
+  notice('これまでの会話から商品を探しています…');
+  return renderChat(await api(chatPath()+'/search','POST',{
+    fromConversation:true
+  }));
+}
  if(a==='select-product')return renderChat(await api(chatPath()+'/selected-product','PATCH',{selectedProductId:id}));
  if(a==='generate-proposal'){
   const shared=state.chat.mode==='negotiation', before=shared?state.chat.draftProposal:state.chat.currentProposal;
@@ -133,11 +238,11 @@ async function submit(name,id,f){
  if(name==='child-settings'){await api('/children/'+path(id)+'/settings','PATCH',{rewardGuidelines:guidelines(f),constraints:{mustHave:lines(f.mustHave),mustAvoid:lines(f.mustAvoid)},chorePreferences:lines(f.chorePreferences)});return notice('条件を保存しました。');}
  if(name==='profile'){await api('/profile','PATCH',{displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null,chorePreferences:lines(f.chorePreferences)});state.session=await api('/auth/session');return notice('プロフィールを保存しました。');}
  if(name==='pair-respond'){await api('/pairing/requests/'+path(id)+'/responses','POST',{decision:f.decision,...(f.decision==='approved'?{confirmationCode:f.confirmationCode.trim()}:{})});await settings();return notice('接続申請に返事しました。子どもの端末で接続を完了してください。');}
- if(name==='create-chore'){await api('/chores','POST',{childId:state.childId,title:f.title.trim(),description:f.description.trim(),rewardAmountYen:amount(f.rewardAmountYen),dueAt:due(f.dueAt)});await home();return notice('お手伝いを依頼しました。');}
- if(name==='create-request'){await api('/chore-requests','POST',{title:f.title.trim(),note:f.note.trim()});await home();return notice('お手伝いを提案しました。');}
- if(name==='respond-request'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('見送る理由を書いてください。');await api('/chore-requests/'+path(id)+'/respond','POST',{decision:f.decision,reason:f.reason.trim(),...(f.decision==='approved'?{title:f.title.trim(),rewardAmountYen:amount(f.rewardAmountYen),dueAt:due(f.dueAt)}:{})});await home();return notice('提案に返事しました。');}
- if(name==='submit-chore'){await api('/chores/'+path(id)+'/submit','POST',{note:f.note.trim()});await home();return notice('できたことを報告しました。');}
- if(name==='review-chore'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('やり直してほしいことを書いてください。');await api('/chores/'+path(id)+'/review','POST',{decision:f.decision,reason:f.reason.trim()});await home();return notice(f.decision==='approved'?'ありがとうポイントを反映しました。':'やり直しをお願いしました。');}
+ if(name==='create-chore'){await api('/chores','POST',{childId:state.childId,title:f.title.trim(),description:f.description.trim(),rewardAmountYen:amount(f.rewardAmountYen),dueAt:due(f.dueAt)});await chores();return notice('お手伝いを依頼しました。');}
+ if(name==='create-request'){await api('/chore-requests','POST',{title:f.title.trim(),note:f.note.trim()});await chores();return notice('おうちのひとに つたえたよ。');}
+ if(name==='respond-request'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('見送る理由を書いてください。');await api('/chore-requests/'+path(id)+'/respond','POST',{decision:f.decision,reason:f.reason.trim(),...(f.decision==='approved'?{title:f.title.trim(),rewardAmountYen:amount(f.rewardAmountYen),dueAt:due(f.dueAt)}:{})});await chores();return notice('提案に返事しました。');}
+ if(name==='submit-chore'){await api('/chores/'+path(id)+'/submit','POST',{note:f.note.trim()});await chores();return notice('できた！を しらせたよ。');}
+ if(name==='review-chore'){if(f.decision==='rejected'&&!f.reason.trim())throw new Error('やり直してほしいことを書いてください。');await api('/chores/'+path(id)+'/review','POST',{decision:f.decision,reason:f.reason.trim()});await chores();return notice(f.decision==='approved'?'ありがとうポイントを反映しました。':'やり直しをお願いしました。');}
  if(name==='message')return renderChat(await api(chatPath()+'/messages','POST',{message:f.message.trim()}));
  if(name==='edit-proposal'){await api('/proposals/'+path(id),'PATCH',{version:state.proposal.proposal.version,persuasionText:f.persuasionText.trim(),purchaseConditions:lines(f.purchaseConditions)});await proposal(id);return notice('下書きを保存しました。内容を確認して送ってください。');}
  if(name==='respond-proposal'){if(f.decision!=='approved'&&!f.reason.trim())throw new Error('理由を書いてください。');await api('/proposals/'+path(id)+'/responses','POST',{version:state.proposal.proposal.version,decision:f.decision,reason:f.reason.trim()||null});await proposal(id);return notice('提案に返事しました。');}
@@ -146,7 +251,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');
 document.addEventListener('input',e=>{if(e.target.closest('[data-form="edit-proposal"]'))state.dirty=true;});
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
 document.addEventListener('submit',e=>{const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();const data=Object.fromEntries(new FormData(f));run(()=>submit(f.dataset.form,f.dataset.id,data),f);});
-document.addEventListener('change',e=>{if(e.target.id==='child-selector'){state.childId=e.target.value;state.goalOrder=[];if(parent()&&location.hash.startsWith('#child-home/')){void go('#child-home/'+path(state.childId));}else void navigate();}});
+document.addEventListener('change',e=>{if(e.target.id==='child-selector'){state.childId=e.target.value;state.goalOrder=[];if(parent()&&location.hash.startsWith('#child-home/')){void go('#child-home/'+path(state.childId));}else if(parent()&&/^#(?:conversation|negotiation)\//.test(location.hash)){void go('#conversations');}else void navigate();}});
 document.addEventListener('error',e=>{if(e.target.matches?.('.product-image')){e.target.hidden=true;const fallback=e.target.nextElementSibling;if(fallback)fallback.hidden=false;}},true);
 window.addEventListener('hashchange',()=>{if(!canLeave()){history.replaceState(null,'',state.routeHash||'#home');return;}void navigate();});
 run(async()=>{state.session=await api('/auth/session');const token=new URLSearchParams(location.hash.slice(1)).get('invitationToken');if(token){if(state.session.authenticated){history.replaceState(null,'','#home');await route();notice('ログイン中です。子どもの別端末または別ブラウザーで招待を開いてください。',true);return;}history.replaceState(null,'','/pairing');await pair(token);history.replaceState(null,'','#pairing');return;}if(new URLSearchParams(location.search).has('authError')){history.replaceState(null,'',location.pathname+location.hash);await route();notice('ログインできませんでした。もう一度お試しください。',true);return;}await route();});

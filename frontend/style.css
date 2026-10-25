@@ -847,6 +847,7 @@ button:disabled { cursor: wait; opacity: .6; }
 a { text-underline-offset: 3px; }
 h1[tabindex="-1"]:focus { outline: none; }
 .app {
+  position: relative;
   max-width: 540px;
   margin: 24px auto;
   min-height: calc(100dvh - 48px);
@@ -927,6 +928,9 @@ h1[tabindex="-1"]:focus { outline: none; }
 .chat-intro h1 { margin: 0; font-size: 17px; }
 .chat-intro p { margin: 0; font-size: 10px; color: var(--text-sub); }
 .chat-intro .section-link { margin-left: auto; font-size: 10px; padding: 4px 8px; }
+.chat-intro-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.chat-intro .new-chat-btn { margin: 0; flex: none; width: auto; min-height: 36px; font-size: 12px; padding: 6px 12px; white-space: nowrap; }
+.chat-intro .delete-chat-btn { background: #fdecec; color: #b42318; }
 .messages { gap: 23px; padding: 8px 0; scrollbar-width: thin; scrollbar-color: #d4e5ec transparent; }
 .msg { max-width: 96%; gap: 9px; }
 .msg-body { min-width: 0; }
@@ -1005,6 +1009,242 @@ h1[tabindex="-1"]:focus { outline: none; }
 .chat-message.participant{background:#f1f4fa;align-self:flex-start}
 @media(max-width:380px){.assistant-message{gap:8px}.assistant-message .message-avatar{flex-basis:30px;width:30px;height:30px}.assistant-message .chat-message{max-width:calc(100% - 38px)}}
 
+/* 統合チャット画面 */
+.chat-switcher {
+  margin: 0 0 16px;
+  border: 1px solid #dcecf0;
+  border-radius: 16px;
+  background: #f6fcff;
+  overflow: hidden;
+}
+
+.chat-switcher summary {
+  padding: 14px 16px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.chat-switcher p {
+  margin: 10px 16px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #58737b;
+}
+
+.chat-switcher .btn-pill {
+  display: flex;
+  width: calc(100% - 32px);
+  margin: 8px 16px;
+  justify-content: center;
+}
+
+.chat-switcher .btn-pill:last-child {
+  margin-bottom: 16px;
+}
+
+
+/* チャット画面：履歴のみスクロール、操作欄を下部固定 */
+#content.chat-layout-fixed-v2 {
+  height: calc(100dvh - 165px);
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-layout-fixed-v2 .chat-switcher,
+.chat-layout-fixed-v2 .chat-intro {
+  flex-shrink: 0;
+}
+
+.chat-layout-fixed-v2 .chat-scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 8px 2px 20px;
+}
+
+.chat-layout-fixed-v2 .chat-log {
+  overflow: visible;
+}
+
+.chat-layout-fixed-v2 .chat-fixed-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid #dcecf0;
+  background: #fff;
+}
+
+.chat-layout-fixed-v2 .chat-fixed-footer form {
+  margin: 0;
+}
+
+.chat-layout-fixed-v2 .chat-fixed-footer .btn-pill {
+  width: 100%;
+  align-self: stretch;
+}
+
+@media (max-width: 600px) {
+  #content.chat-layout-fixed-v2 {
+    height: calc(100dvh - 130px);
+  }
+}
+
+
+/* chat-layout-v3: ChatGPT風の固定チャットUI */
+
+/* アプリ全体を画面の高さに収める */
+body:has(#content.chat-layout-v3) {
+  overflow: hidden;
+}
+
+.app:has(#content.chat-layout-v3) {
+  height: calc(100dvh - 48px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app:has(#content.chat-layout-v3) .brand-header,
+.app:has(#content.chat-layout-v3) #navigation,
+.app:has(#content.chat-layout-v3) #notice {
+  flex-shrink: 0;
+}
+
+/* チャット本体 */
+#content.chat-layout-v3 {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 20px 12px;
+}
+
+/* 上部のタイトルは固定 */
+.chat-layout-v3 .chat-intro {
+  flex-shrink: 0;
+}
+
+/* チャット履歴だけスクロール */
+.chat-layout-v3 .chat-scroll-area {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 10px 2px 16px;
+}
+
+.chat-layout-v3 .chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* 入力エリアを下部に固定 */
+.chat-layout-v3 .chat-fixed-footer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0 max(10px, env(safe-area-inset-bottom));
+  margin: 0;
+  border-top: 1px solid #e3edf1;
+  background: #fff;
+}
+
+/* 商品検索ボタン */
+.chat-layout-v3 .chat-fixed-footer > .btn-pill {
+  align-self: stretch;
+  width: 100%;
+  min-height: 42px;
+  border-radius: 999px;
+  background: #e9f7ff;
+  color: #0069b8;
+  font-size: 13px;
+}
+
+/* 入力欄と送信ボタンを横並びに */
+.chat-layout-v3 form[data-form="message"] {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 0;
+  padding: 5px 6px 5px 14px;
+  border: 1.5px solid #b8d6e4;
+  border-radius: 26px;
+  background: #fff;
+}
+
+/* ラベルは画面上に表示せず、入力欄の中に案内を表示 */
+.chat-layout-v3 form[data-form="message"] .field-label {
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
+.chat-layout-v3 form[data-form="message"] textarea {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  max-height: 130px;
+  height: 42px;
+  padding: 10px 4px;
+  margin: 0;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  resize: none;
+  background: transparent;
+  font-size: 16px;
+  line-height: 22px;
+}
+
+/* 送信ボタンを右側の丸い矢印に */
+.chat-layout-v3 form[data-form="message"] button[type="submit"] {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #008dcc;
+  color: #fff;
+  font-size: 0;
+  cursor: pointer;
+}
+
+.chat-layout-v3 form[data-form="message"] button[type="submit"]::after {
+  content: "↑";
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@media (max-width: 600px) {
+  .app:has(#content.chat-layout-v3) {
+    height: 100dvh;
+  }
+
+  #content.chat-layout-v3 {
+    padding: 6px 14px 8px;
+  }
+}
 /* Keep the main menu within reach while scrolling. */
 .app:has(#navigation:not([hidden])) { padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
 #navigation {
@@ -1024,14 +1264,20 @@ h1[tabindex="-1"]:focus { outline: none; }
   background: #fff;
   box-shadow: 0 -4px 18px #214d6510;
 }
-#navigation a { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 4px; text-align: center; font-size: 13px; }
+#navigation a { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 8px 4px; text-align: center; font-size: 13px; }
+#navigation .nav-icon { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* On narrow phones, stack each icon above its label. */
+@media (max-width: 420px) {
+  #navigation a { flex-direction: column; gap: 3px; padding: 6px 2px; font-size: 11px; line-height: 1.2; }
+  #navigation .nav-icon { width: 20px; height: 20px; }
+}
 
-/* Demo tools must not affect the normal screen layout. */
+/* Anchor the labels to the app panel without affecting its layout. */
 .demo-tools {
-  position: fixed;
+  position: absolute;
   z-index: 101;
   top: 8px;
-  right: max(8px, calc((100vw - 540px) / 2 + 8px));
+  right: 8px;
   padding: 4px 8px;
   border: 1px solid #dcecf0;
   border-radius: 8px;
@@ -1043,10 +1289,10 @@ h1[tabindex="-1"]:focus { outline: none; }
 .demo-tools[hidden] { display: none; }
 
 .role-label {
-  position: fixed;
+  position: absolute;
   z-index: 101;
   top: 8px;
-  left: max(8px, calc((100vw - 540px) / 2 + 8px));
+  left: 8px;
   padding: 4px 8px;
   border-radius: 8px;
   background: #edf9f3;
@@ -1056,3 +1302,78 @@ h1[tabindex="-1"]:focus { outline: none; }
   pointer-events: none;
 }
 .role-label[hidden] { display: none; }
+
+/* お手伝いカード：状態ごとの色と右上の大きなラベル */
+.chore-status {
+  float: right;
+  margin: -4px -4px 8px 12px;
+  max-width: 120px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: center;
+}
+.chore-status-icon { display: block; font-size: 24px; line-height: 1.2; }
+.chore-card.is-approved { background: #ffe3e3; border-color: #f4a6a6; }
+.chore-card.is-approved .chore-status { background: #d93636; color: #fff; }
+.chore-card.is-rejected { background: #e0eeff; border-color: #9cc3f2; }
+.chore-card.is-rejected .chore-status { background: #1f6fc4; color: #fff; }
+.chore-card.is-waiting { background: #eeeeee; border-color: #c9c9c9; }
+.chore-card.is-waiting .chore-status { background: #6b6b6b; color: #fff; }
+
+/* Chat layout fix: bottom navigation and composer */
+.app:has(#content.chat-layout-v3) {
+  position: relative;
+  padding-bottom: 0;
+}
+
+.app:has(#content.chat-layout-v3) #navigation:not([hidden]) {
+  position: relative;
+  bottom: auto;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+#content.chat-layout-v3 {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-layout-v3 .chat-scroll-area {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-layout-v3 .chat-fixed-footer {
+  flex-shrink: 0;
+  background: #fff;
+  z-index: 2;
+}
+
+@media (max-width: 600px) {
+  .app:has(#content.chat-layout-v3) {
+    height: 100dvh;
+    margin: 0;
+  }
+}
+
+/* Chat screen: composer directly above bottom navigation */
+.app:has(#content.chat-layout-v3) #navigation:not([hidden]) {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  transform: none;
+  width: 100%;
+  order: 2;
+  flex-shrink: 0;
+}
+.app:has(#content.chat-layout-v3) #content.chat-layout-v3 { order: 1; }
+.chat-child-toggle { display: flex; gap: 6px; overflow-x: auto; flex-shrink: 0; padding: 3px 0 8px; }
+.chat-child-toggle button { flex: 0 0 auto; border: 1px solid #b8d6e4; border-radius: 999px; background: #fff; padding: 8px 14px; cursor: pointer; }
+.chat-child-toggle button[aria-pressed="true"] { background: #007fc5; color: #fff; border-color: #007fc5; }

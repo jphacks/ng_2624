@@ -98,6 +98,10 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   await call('/conversations/'+c.data.conversationId+'/start','POST',{},'parent');
   const response=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'Switch スプラトゥーン'})}));
   assert.equal(response.status,200);assert.equal(captured.role,'parent');assert.equal(captured.searchQuery,'Switch スプラトゥーン');assert.equal(captured.childContext.gradeLevel,4);assert.ok(captured.childContext.age<captured.profile.age);
+  const fromChat=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({fromConversation:true})}));
+  assert.equal(fromChat.status,200);assert.equal(captured.searchQuery,undefined);
+  assert.match(captured.message,/これまでの相談内容/);
+  assert.ok(captured.history.some((m:any)=>m.sender==='user'&&m.content.includes('Switch スプラトゥーン')));
  });
  await t.test('pairing can restart with a new invitation in the same browser and cannot replace an authenticated parent',async()=>{
   const first=await call('/children/'+child+'/invitations','POST',{},'parent');assert.equal(first.status,201);
