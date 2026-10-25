@@ -6,7 +6,6 @@ import { selectRewards } from './rewards.ts';
 import { publicUrl } from './validation.ts';
 import { ConversationError } from './errors.ts';
 import { searchAmazon } from './amazon.ts';
-import { searchRetail } from './retail.ts';
 import { isRetailProductUrl } from '../shared/product-source.ts';
 
 // 販売店の直接取得は各8秒。その後の補助検索も含め、会話生成とHTTPの150秒に収める。
@@ -51,7 +50,7 @@ export async function searchProducts(
         })]);
         controller.signal.throwIfAborted();
         const successful = results.filter((r): r is PromiseFulfilledResult<GenerationResult> => r.status === 'fulfilled');
-        const directAmazon = searchProvider === searchAmazon || searchProvider === searchRetail || successful.some(({ value }) => value.candidates !== undefined);
+        const directAmazon = searchProvider === searchAmazon || successful.some(({ value }) => value.candidates !== undefined);
         if (!successful.length && !directAmazon) {
             const failed = results.find(r => r.status === 'rejected');
             if (failed?.status === 'rejected') throw failed.reason;
@@ -112,6 +111,8 @@ export async function searchProducts(
             return { products: selectRewards(products), search };
         }
         best = await collect();
+        // Native Amazon search is authoritative: never fill gaps with Google or another shop.
+        if (directAmazon) return best;
         for (let attempt = 0; attempt < 2 && best.products.length < 3; attempt++) {
             try {
                 const request = buildSearchRequest(query, input);

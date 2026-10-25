@@ -318,7 +318,7 @@ export function createProductPreview(deps: Dependencies = dependencies) {
   }
   async function prepareProduct(product: ProductCandidate): Promise<ProductCandidate | null> {
     const productUrl = await resolveAmazonProductUrl(product.productUrl);
-    if (productUrl) return enrichProduct({ ...product, productUrl });
+    if (productUrl) return enrichProduct({ ...product, productUrl, sourceUrls: [...new Set([...product.sourceUrls, productUrl])] });
     // 不透明な検索出典を商品扱いしない。記事やQ&Aへの転送は候補から除く。
     return null;
   }

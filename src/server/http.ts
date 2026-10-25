@@ -26,7 +26,9 @@ const server = createServer(async (req, res) => {
     const response = await app(new Request(url, { method: req.method, headers, ...(body.length && !['GET', 'HEAD'].includes(req.method || '') ? { body } : {}) }), req.socket.remoteAddress || 'unknown');
     for (const [k, v] of response.headers) if (k !== 'set-cookie') res.setHeader(k, v);
     const setCookies = response.headers.getSetCookie(); if (setCookies.length) res.setHeader('Set-Cookie', setCookies);
-    res.writeHead(response.status); res.end(Buffer.from(await response.arrayBuffer()));
+    res.writeHead(response.status);
+    if (response.body) { for await (const chunk of response.body) res.write(Buffer.from(chunk)); }
+    res.end();
   } catch { if (!res.headersSent) res.writeHead(500); res.end('Server error'); }
 });
 server.requestTimeout = 180000; server.headersTimeout = 15000;

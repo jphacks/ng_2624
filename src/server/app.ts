@@ -6,7 +6,7 @@ import { AppError, assert, text, uuid, integer, strings, date, randomToken, hash
 import type { Config, DB, Row } from './core.ts';
 import type { AIInput, AIOutput, ProductCandidate } from '../shared/types.ts';
 
-interface Dependencies { db: DB; ai: (input: AIInput) => Promise<AIOutput>; enrich: (product: ProductCandidate) => Promise<ProductCandidate | null>; image: (url: string, imageHint?: string | null) => Promise<{ body: Buffer; contentType: string } | null>; qr: (url: string) => Promise<string>; }
+interface Dependencies { db: DB; ai: (input: AIInput, onSearchStart?: () => void) => Promise<AIOutput>; enrich: (product: ProductCandidate) => Promise<ProductCandidate | null>; image: (url: string, imageHint?: string | null) => Promise<{ body: Buffer; contentType: string } | null>; qr: (url: string) => Promise<string>; }
 const DAY = 86400000;
 function aiFailure(error: unknown, fallback: string): AppError {
   if (error instanceof AppError) return error;
@@ -62,6 +62,7 @@ export function createApp(config: Config, dep: Dependencies) {
         const stored = storedProducts.find(p=>p.id===saved.id);
         if (stored) product = { ...saved, priceJpy: stored.price_jpy ?? saved.priceJpy, priceCheckedAt: stored.price_checked_at ?? saved.priceCheckedAt,
           imageUrl: stored.image_url || saved.imageUrl, productUrl: stored.product_url || saved.productUrl };
+        product = { ...product, sourceUrls: [...new Set([...(product.sourceUrls || []), product.productUrl])] };
         if (product.priceJpy != null && product.imageUrl) return product;
         const key = `${product.id}:${product.productUrl}`, now = Date.now();
         let cached = hydration.get(key);
@@ -82,7 +83,7 @@ export function createApp(config: Config, dep: Dependencies) {
           })();
           cached = { until: now + 300000, pending }; hydration.set(key, cached);
         }
-        if(waitForMetadata){const recovered=await cached.pending;return {...product,priceJpy:product.priceJpy??recovered.priceJpy,priceCheckedAt:product.priceCheckedAt??recovered.priceCheckedAt,imageUrl:product.imageUrl||recovered.imageUrl,productUrl:recovered.productUrl};}
+        if(waitForMetadata){const recovered=await cached.pending;return {...product,priceJpy:product.priceJpy??recovered.priceJpy,priceCheckedAt:product.priceCheckedAt??recovered.priceCheckedAt,imageUrl:product.imageUrl||recovered.imageUrl,productUrl:recovered.productUrl,sourceUrls:[...new Set([...product.sourceUrls,...recovered.sourceUrls,recovered.productUrl])]};}
         void cached.pending.catch(()=>{});
         return product;
       } catch { return product; }
@@ -155,8 +156,8 @@ export function createApp(config: Config, dep: Dependencies) {
   }
   async function enrichOutput(output: AIOutput): Promise<AIOutput> {
     if (output.action !== 'PRODUCT') return output;
-    const products = (await Promise.all(output.products.map(dep.enrich))).filter((p): p is ProductCandidate => p !== null);
-    return products.length ? { ...output, products } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: '検索結果の商品リンクを確認できませんでした。時間をおいて、もう一度お試しください。' };
+    const products = (await Promise.all(output.products.map(p => dep.enrich(p).catch(() => null)))).filter((p): p is ProductCandidate => p !== null && p.priceJpy !== null && p.priceJpy > 0 && !!p.imageUrl);
+    return products.length ? { ...output, products, reply: products.length === output.products.length ? output.reply : `${products.length}こ見つかったよ！ 気になるものをえらんでね。` } : { requestId: output.requestId, action: 'HEARING', search: output.search, reply: 'Amazonから画像とねだんを かくにんできる商品を 取得できなかったよ。もういちど さがしてみてね。' };
   }
   async function runNegotiationAI(user: Row, id: string, message: string | null) {
     rate(`ai:${user.id}`,20,600000);
@@ -179,7 +180,7 @@ export function createApp(config: Config, dep: Dependencies) {
       throw aiFailure(e, 'AIの返答を取得できませんでした。保存済みの交渉を確認してから再操作してください。');
     }
   }
-  async function runAI(user: Row, conversationId: string, message: string | null, searchQuery?: string) {
+  async function runAI(user: Row, conversationId: string, message: string | null, searchQuery?: string, onSearchStart?: () => void) {
     rate(`ai:${user.id}`, 20, 600000);
     assert(config.geminiKey, 503, 'SETUP_REQUIRED', 'AIの接続設定がまだ完了していません。');
     const lockId = randomUUID();
@@ -192,7 +193,7 @@ export function createApp(config: Config, dep: Dependencies) {
       if (pv && !products.some(x => x.id === pv.product.id)) products.push(pv.product);
       const child = await one('users', { id: eq(c.child_id || user.id) });
       const input: AIInput = { searchQuery, childContext: { age: age(child.birth_date), gradeLevel: childView(child).gradeLevel }, requestId: randomUUID(), now: new Date().toISOString(), role: user.role, mode: 'consultation', message, history: history.reverse().filter(x => ['user', 'assistant'].includes(x.sender)&&x.content!==CONVERSATION_SEARCH_MESSAGE).map(x => ({ id: x.id, sender: x.sender, content: x.content, createdAt: x.created_at })), negotiationHistory: [], profile: { ...pref.profile, preferences: { ...pref.profile.preferences, wishes: [], expectations: [] } }, sharedConditions: [], constraints: configChild.constraints, products: products.map(p => ({ ...p, imageUrl: null })), selectedProductId: c.selected_product_id, currentProposal: p ? mapProposal(p) : null, negotiationResult: pv?.negotiationResult || null };
-      const output = await enrichOutput(await dep.ai(input));
+      const output = await enrichOutput(await dep.ai(input, onSearchStart));
       const updated = await db.rpc('wb_finish_ai', { p_actor_id: user.id, p_conversation_id: c.id, p_lock_id: lockId, p_message: message===CONVERSATION_SEARCH_MESSAGE?null:message, p_output: output });
       return chatView(user, updated);
     } catch (e) {
@@ -205,6 +206,19 @@ export function createApp(config: Config, dep: Dependencies) {
     const responseHeaders = new Headers({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
     function setCookie(name: string, value: string, secs?: number) { responseHeaders.append('Set-Cookie', cookie(config, name, value, secs)); }
     function result(data: unknown, status = 200) { return new Response(JSON.stringify({ data }), { status, headers: responseHeaders }); }
+    function aiResponse(work: (progress: () => void) => Promise<unknown>) {
+      if (!request.headers.get('accept')?.includes('application/x-ndjson')) return work(() => {}).then(data => result(data));
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({ async start(controller) {
+        const send = (event: unknown) => controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
+        try { const data = await work(() => send({ progress: 'searching' })); send({ data }); }
+        catch (error) { const e = aiFailure(error, '処理に失敗しました。もう一度お試しください。'); send({ error: { code: e.code, message: e.message, status: e.status } }); }
+        finally { controller.close(); }
+      } });
+      responseHeaders.set('Content-Type', 'application/x-ndjson; charset=utf-8');
+      responseHeaders.set('X-Accel-Buffering', 'no');
+      return new Response(stream, { headers: responseHeaders });
+    }
     function redirect(url: string) { responseHeaders.set('Location', url); return new Response(null, { status: 303, headers: responseHeaders }); }
     try {
       const url = new URL(request.url), path = url.pathname, method = request.method;
@@ -389,11 +403,11 @@ export function createApp(config: Config, dep: Dependencies) {
         if (conversation[3] === 'start' && method === 'POST') return result(await chatView(user, await db.rpc('wb_start_consultation', { p_actor_id: user.id, p_conversation_id: c.id })));
         if (conversation[3] && method !== 'GET') assert(await db.rpc('wb_consultation_phase', { p_actor_id: user.id, p_conversation_id: c.id }) === 'consultation', 409, 'INVALID_STATE', '個別相談は開始前、回答待ち、または終了しています。');
         if (conversation[3] === 'search' && method === 'POST') {
-          if (body.fromConversation === true) return result(await runAI(user, c.id, CONVERSATION_SEARCH_MESSAGE));
-          const query = text(body.query, 300); return result(await runAI(user, c.id, `商品検索：${query}`, query));
+          if (body.fromConversation === true) return await aiResponse(progress => runAI(user, c.id, CONVERSATION_SEARCH_MESSAGE, undefined, progress));
+          const query = text(body.query, 300); return await aiResponse(progress => runAI(user, c.id, `商品検索：${query}`, query, progress));
         }
-        if (conversation[3] === 'messages' && method === 'POST') return result(await runAI(user, c.id, text(body.message)));
-        if (conversation[3] === 'selected-product' && method === 'PATCH') return result(await chatView(user, await db.rpc('wb_select_product', { p_actor_id: user.id, p_conversation_id: c.id, p_product_id: uuid(body.selectedProductId) })));
+        if (conversation[3] === 'messages' && method === 'POST') return await aiResponse(progress => runAI(user, c.id, text(body.message), undefined, progress));
+        if (conversation[3] === 'selected-product' && method === 'PATCH') { const selected = (await hydrateProducts(c.products,true)).find(p => p.id === body.selectedProductId); assert(selected && selected.priceJpy !== null && selected.priceJpy > 0 && selected.imageUrl,409,'PRODUCT_UNAVAILABLE','この商品は画像と価格を確認できません。もう一度Amazonで商品を探してください。'); return result(await chatView(user, await db.rpc('wb_select_product', { p_actor_id: user.id, p_conversation_id: c.id, p_product_id: uuid(body.selectedProductId) }))); }
         if (conversation[3] === 'confirm-reason' && method === 'POST') return result(await chatView(user,await db.rpc('wb_confirm_reason',{p_actor_id:user.id,p_conversation_id:c.id,p_reason:text(body.reasonSummary)})));
         if (conversation[3] === 'proposal-drafts' && method === 'POST') return result(await runAI(user, c.id, null));
       }

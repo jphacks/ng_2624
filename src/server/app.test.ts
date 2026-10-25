@@ -34,7 +34,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  let mode='product', aiCalls=0;
  const app=createApp(config,{db,ai:async input=>{parseAIInput(input);aiCalls++;assert.equal(input.mode,'consultation');assert.deepEqual(input.negotiationHistory,[]);assert.deepEqual(input.sharedConditions,[]);assert(input.profile);assert.deepEqual(input.profile.preferences.expectations,[]);assert.equal(input.profile.gradeLevel,input.role==='child'?4:null);assert(!JSON.stringify(input.history).includes('親の秘密'));
   return mode==='product'?{requestId:input.requestId,action:'PRODUCT',reply:'候補です',search:null,products:[{id:id(30),name:'商品',priceJpy:95,productUrl:'https://www.amazon.co.jp/dp/B000000000',priceCheckedAt:new Date().toISOString(),size:'small',description:'説明',recommendationReason:'候補',sourceUrls:['https://www.amazon.co.jp/dp/B000000000']}]}:{requestId:input.requestId,action:'PROPOSAL',reply:'下書きです',search:null,proposalDraft:{productId:id(30),target:'parent',persuasionText:'大切に使います',purchaseConditions:['お手伝いをする'],basedOn:input.currentProposal?{proposalId:input.currentProposal.id,version:input.currentProposal.version}:null}};
- },enrich:async p=>({...p,imageUrl:null}),image:async()=>null,qr:async()=> 'data:image/png;base64,test'});
+ },enrich:async p=>({...p,imageUrl:'/api/products/'+p.id+'/image'}),image:async()=>null,qr:async()=> 'data:image/png;base64,test'});
  async function call(path:string,method='GET',body?:unknown,role='child',csrf='csrf',origin=config.origin){const tok=role==='parent'?tokenParent:role==='stranger'?tokenStranger:tokenChild;const r=await app(new Request(config.origin+'/api'+path,{method,headers:{cookie:'wb_local_session='+tok,origin,'x-csrf-token':csrf,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}));return {status:r.status,...await r.json()};}
  await t.test('CSRF, role and family gates run before protected mutations',async()=>{
   assert.equal((await call('/children/'+child+'/invitations','POST',{})).status,403);
@@ -113,7 +113,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   assert.match(captured.message,/これまでの相談内容/);
   assert.ok(captured.history.some((m:any)=>m.sender==='user'&&m.content.includes('Switch スプラトゥーン')));
  });
- await t.test('検索の引用URLが販売商品ページに転送されれば3候補を保存して表示できる',async()=>{
+ await t.test('画像と価格が取れない検索候補は保存・表示・選択しない',async()=>{
   const preview=createProductPreview({resolve:async()=>[{address:'93.184.216.34',family:4}],read:async url=>{if(url.hostname==='vertexaisearch.cloud.google.com')return {status:302,headers:{location:'https://www.amazon.co.jp/dp/B00000000'+url.pathname.slice(-1)},body:Buffer.alloc(0)};throw Error('image unavailable');}});
   const searchApp=createApp(config,{db,ai:async input=>({requestId:input.requestId,action:'PRODUCT',reply:'ゲームの候補です',search:null,
    products:([ 'small','medium','large' ] as const).map((size,i)=>({id:id(200+i),size,name:`ゲーム${i+1}`,priceJpy:null,priceCheckedAt:null,
@@ -123,8 +123,8 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   await call('/conversations/'+c.data.conversationId+'/start','POST',{});
   const response=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'ゲーム'})}));
   const payload=await response.json();assert.equal(response.status,200,JSON.stringify(payload));
-  assert.equal(payload.data.products.length,3);assert.equal(payload.data.latestAIOutput.action,'PRODUCT');
-  const saved=await call('/conversations/'+c.data.conversationId);assert.equal(saved.data.products.length,3);
+  assert.equal(payload.data.products.length,0);assert.equal(payload.data.latestAIOutput.action,'HEARING');
+  const saved=await call('/conversations/'+c.data.conversationId);assert.equal(saved.data.products.length,0);
   assert.ok(saved.data.products.every((p:any)=>p.imageUrl===null&&p.productUrl.startsWith('https://www.amazon.co.jp/dp/')));
  });
  await t.test('saved candidates recover verified prices and images before proposal generation; failed candidates remain',async()=>{
@@ -147,6 +147,32 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   assert.equal((await db.list('products',{id:'eq.'+id(230)}))[0].price_jpy,4980);
   assert.equal((await request('/conversations/'+cid+'/selected-product','PATCH',{selectedProductId:id(230)})).status,200);
   const draft=await request('/conversations/'+cid+'/proposal-drafts','POST',{});assert.equal(draft.status,200,JSON.stringify(draft));assert.equal(draft.data.currentProposal,null);const confirmed=await request('/conversations/'+cid+'/confirm-reason','POST',{reasonSummary:draft.data.reasonSummary});assert.equal(confirmed.data.currentProposal.productId,id(230));
+ });
+ await t.test('旧候補のURL不整合を補正し、理由確認と保護者への送信まで進める',async()=>{
+  const productId=id(270),canonical='https://www.amazon.co.jp/dp/B000000270';
+  const c=await call('/conversations','POST',{}),cid=c.data.conversationId;
+  await call('/conversations/'+cid+'/start','POST',{});
+  const product={id:productId,name:'ゲーム本体',size:'small',priceJpy:2000,priceCheckedAt:new Date().toISOString(),productUrl:canonical,imageUrl:'/api/products/'+productId+'/image',description:'ゲーム本体',recommendationReason:'希望の商品',sourceUrls:['https://vertexaisearch.cloud.google.com/grounding-api-redirect/legacy']};
+  await db.insert('products',{id:productId,name:product.name,size:product.size,price_jpy:2000,price_checked_at:product.priceCheckedAt,product_url:canonical,image_url:product.imageUrl,description:product.description,recommendation_reason:product.recommendationReason,source_urls:product.sourceUrls});
+  await db.update('conversations',{id:'eq.'+cid},{products:[product],selected_product_id:productId});
+  let generated=0;
+  const fixed=createApp(config,{db,ai:async raw=>{const input=parseAIInput(raw);generated++;assert(input.products[0].sourceUrls.includes(canonical));return {requestId:input.requestId,action:'PROPOSAL',reply:'この理由で合ってる？',search:null,proposalDraft:{productId,target:'parent',persuasionText:'楽しそうだから',purchaseConditions:[],basedOn:null}};},enrich:async p=>p,image:async()=>null,qr:async()=>''});
+  const request=async(path:string,body:unknown)=>{const r=await fixed(new Request(config.origin+'/api'+path,{method:'POST',headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','content-type':'application/json'},body:JSON.stringify(body)}));const result=await r.json();assert.equal(r.status,200,JSON.stringify(result));return result.data;};
+  const reason=await request('/conversations/'+cid+'/messages',{message:'楽しそうだから'});assert.equal(reason.reasonSummary,'楽しそうだから');assert.equal(generated,1);
+  const confirmed=await request('/conversations/'+cid+'/confirm-reason',{reasonSummary:reason.reasonSummary});const draft=confirmed.currentProposal;
+  await request('/proposals/'+draft.id+'/send',{version:draft.version});
+  const received=await call('/proposals/'+draft.id,'GET',undefined,'parent');assert.equal(received.data.canRespond,true);assert.equal(received.data.proposal.persuasionText,'楽しそうだから');
+ });
+ await t.test('自動検索の進捗を結果の確定前にストリームで返す',async()=>{
+  const c=await call('/conversations','POST',{}),cid=c.data.conversationId;await call('/conversations/'+cid+'/start','POST',{});
+  let finish!:()=>void;const waiting=new Promise<void>(resolve=>{finish=resolve;});
+  const streaming=createApp(config,{db,ai:async(input,progress)=>{progress?.();await waiting;return {requestId:input.requestId,action:'HEARING',reply:'検索しました',search:null};},enrich:async p=>p,image:async()=>null,qr:async()=>''});
+  const response=await streaming(new Request(config.origin+'/api/conversations/'+cid+'/messages',{method:'POST',headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','content-type':'application/json',accept:'application/x-ndjson'},body:JSON.stringify({message:'ゲームを探して'})}));
+  const reader=response.body!.getReader();try{
+   const first=await reader.read();assert.match(new TextDecoder().decode(first.value),/"progress":"searching"/);finish();
+   let result='';while(true){const chunk=await reader.read();if(chunk.done)break;result+=new TextDecoder().decode(chunk.value);}
+   assert.equal(JSON.parse(result).data.messages.at(-1).content,'検索しました');
+  }finally{finish();reader.releaseLock();}
  });
  await t.test('pairing can restart with a new invitation in the same browser and cannot replace an authenticated parent',async()=>{
   const first=await call('/children/'+child+'/invitations','POST',{},'parent');assert.equal(first.status,201);

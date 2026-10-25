@@ -2,13 +2,13 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHttpServer } from '../src/server/http.ts';
 import { prepareProduct, fetchResolvedProductImage } from '../src/server/preview.ts';
-import { createReply, createGeminiGenerator, searchRetail } from '../src/ai/index.ts';
+import { createReply, createGeminiGenerator, searchAmazon } from '../src/ai/index.ts';
 import { createDemo, readDemoConfig } from './app.ts';
 const require = createRequire(import.meta.url);
 const QRCode = require('qrcode') as { toDataURL: (url: string, options: object) => Promise<string> };
 const config = readDemoConfig();
 const demo = await createDemo(config, {
-  ai: input => createReply(input, { generate: createGeminiGenerator({ apiKey: config.geminiKey }), search: searchRetail }),
+  ai: (input, onSearchStart) => createReply(input, { onSearchStart, generate: createGeminiGenerator({ apiKey: config.geminiKey }), search: searchAmazon }),
   enrich: prepareProduct,
   image: fetchResolvedProductImage,
   qr: url => QRCode.toDataURL(url, { width: 260, margin: 2, errorCorrectionLevel: 'M' }),
