@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   createReply,
   createGeminiGenerator,
+  searchAmazon,
 } from "../../../src/ai/index.ts";
 import type { AIInput } from "../../../Sample_db/types.ts";
 
@@ -192,6 +193,7 @@ Deno.serve(async (req) => {
 
     const output = await createReply(input, {
       generate: createGeminiGenerator({ apiKey }),
+      search: searchAmazon,
     });
 
     // 9. 本人の発言を保存する

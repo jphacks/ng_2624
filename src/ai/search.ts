@@ -2,7 +2,7 @@ import type { ProductSearchContext, ProductCandidate, SearchMetadata } from '../
 import type { ReplyGenerator, GenerationResult } from './gemini.ts';
 import { buildExtractionRequest, buildSearchRequest } from './prompt.ts';
 import { parseProducts } from './protocol.ts';
-import { selectRewards } from './rewards.ts';
+import { GOAL_SIZES, selectRewards } from './rewards.ts';
 import { publicUrl } from './validation.ts';
 import { ConversationError } from './errors.ts';
 
@@ -20,7 +20,7 @@ function supportedPrice(price: number | null, quote: string | null, sourceIds: s
 }
 
 export async function searchProducts(
-    query: string, input: ProductSearchContext, generate: ReplyGenerator, createId: () => string,
+    query: string, input: ProductSearchContext, generate: ReplyGenerator, createId: () => string, searchProvider: ReplyGenerator = generate,
 ): Promise<{ products: ProductCandidate[]; search: SearchMetadata }> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -32,12 +32,35 @@ export async function searchProducts(
         }, SEARCH_BUDGET_MS);
     });
     async function work() {
-        const result = await generate({ ...buildSearchRequest(query, input), timeoutMs: 20_000, signal: controller.signal });
+        const sizes = GOAL_SIZES.filter(size => input.rewardGuidelines[`${size}Jpy`] !== null);
+        const results = await Promise.allSettled(sizes.map(size => searchProvider({
+            ...buildSearchRequest(query, { ...input, rewardGuidelines: {
+                smallJpy: null, mediumJpy: null, largeJpy: null, [`${size}Jpy`]: input.rewardGuidelines[`${size}Jpy`],
+            } }, size), timeoutMs: 20_000, signal: controller.signal,
+        })));
         controller.signal.throwIfAborted();
-        const search: SearchMetadata = result.search ?? { queries: [], sources: [], searchSuggestionsHtml: null };
-        search.sources = search.sources.filter(source => publicUrl(source.url) !== null);
+        const successful = results.filter((r): r is PromiseFulfilledResult<GenerationResult> => r.status === 'fulfilled');
+        if (!successful.length) {
+            const failed = results.find(r => r.status === 'rejected');
+            if (failed?.status === 'rejected') throw failed.reason;
+        }
+        const search: SearchMetadata = { queries: [], sources: [], searchSuggestionsHtml: null };
+        const result: GenerationResult = { text: '', search, evidence: {} };
+        const suggestions = new Set<string>();
+        for (const { value } of successful) {
+            result.text += value.text + '\n';
+            for (const query of value.search?.queries ?? []) if (!search.queries.includes(query)) search.queries.push(query);
+            if (value.search?.searchSuggestionsHtml) suggestions.add(value.search.searchSuggestionsHtml);
+            for (const source of value.search?.sources ?? []) {
+                if (!publicUrl(source.url)) continue;
+                let merged = search.sources.find(s => s.url === source.url);
+                if (!merged) { merged = { ...source, id: `source-${search.sources.length + 1}` }; search.sources.push(merged); }
+                (result.evidence[merged.id] ??= []).push(...(value.evidence[source.id] ?? []));
+            }
+        }
+        search.searchSuggestionsHtml = [...suggestions].join('\n') || null;
         if (!search.sources.length) return { products: [], search };
-        const extracted = await generate({ ...buildExtractionRequest(result.text, search, input), timeoutMs: 10_000, signal: controller.signal });
+        const extracted = await generate({ ...buildExtractionRequest(result.text, search, input, result.evidence), timeoutMs: 10_000, signal: controller.signal });
         controller.signal.throwIfAborted();
         const products: Omit<ProductCandidate, 'size'>[] = [];
         const usedUrls = new Set<string>();

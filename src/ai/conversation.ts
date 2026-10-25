@@ -5,6 +5,7 @@ import type { ReplyGenerator } from './gemini.ts';
 import { buildConversationRequest } from './prompt.ts';
 import { parseDecision } from './protocol.ts';
 import { searchProducts } from './search.ts';
+import { searchAmazon } from './amazon.ts';
 import { GOAL_SIZES, withinGuideline } from './rewards.ts';
 import { parseAIInput } from './validation.ts';
 
@@ -12,6 +13,7 @@ import { parseAIInput } from './validation.ts';
 export const MAX_PRICE_AGE_MS = 24 * 60 * 60 * 1000;
 export interface AIControllerDependencies {
     generate?: ReplyGenerator;
+    search?: ReplyGenerator;
     createId?: () => string;
 }
 
@@ -55,7 +57,7 @@ export async function createReply(
             }
             const found = await searchProducts(decision.searchQuery!, {
                 now: input.now, constraints: input.constraints, rewardGuidelines: input.rewardGuidelines,
-            }, generate, dependencies.createId ?? (() => crypto.randomUUID()));
+            }, generate, dependencies.createId ?? (() => crypto.randomUUID()), dependencies.search ?? (dependencies.generate ? generate : searchAmazon));
             const labels = { small: '小', medium: '中', large: '大' };
             const missing = GOAL_SIZES.filter(size => !found.products.some(product => product.size === size));
             const consultation = missing.length
