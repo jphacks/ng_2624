@@ -330,7 +330,9 @@ test('new unified chat uses existing create, start and product search endpoints'
   if(path.startsWith('/conversations/new'))return thread;
   return basic(path);
  });
+ const scroller=ui.nodes['.chat-scroll-area']={scrollTop:0,scrollHeight:1200};
  await ui.go('#conversations');
+ assert.equal(scroller.scrollTop,1200);
  assert.equal(JSON.stringify(posts),JSON.stringify([{path:'/conversations',body:{}},{path:'/conversations/new/start',body:{}}]));
  assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
  await ui.action('search-product-now');
@@ -339,4 +341,8 @@ test('new unified chat uses existing create, start and product search endpoints'
  assert.equal(posts.at(-1)?.body.fromConversation,true);assert.equal(posts.at(-1)?.body.query,undefined);
  assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="search-products"/);
+ scroller.scrollTop=0;scroller.scrollHeight=2400;
+ await ui.submit('message','',{message:'続きの相談です'});
+ assert.equal(posts.at(-1)?.path,'/conversations/new/messages');
+ assert.equal(scroller.scrollTop,2400);
 });
