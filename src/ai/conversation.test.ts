@@ -295,6 +295,12 @@ test('従来の直接起動を維持し、キーなしなら安全なエラー�
 
 test('実SDKが固定指示・JSON Schema・検索ツール・store=falseを正しいAPI形式で送る', async () => {
     const original = globalThis.fetch;
+    const originalTimeout = AbortSignal.timeout;
+    const timeouts: number[] = [];
+    AbortSignal.timeout = milliseconds => {
+        timeouts.push(milliseconds);
+        return originalTimeout(milliseconds);
+    };
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = async (_url, init) => {
         const body = init?.body ?? (_url instanceof Request ? await _url.clone().text() : '');
@@ -306,14 +312,17 @@ test('実SDKが固定指示・JSON Schema・検索ツール・store=falseを正�
     try {
         const result = await generateGeminiReply({ systemInstruction: '固定の指示', input: '{}', schema: { type: 'object' } }, 'fake-key-for-test');
         assert.equal(result.text, '{"ok":true}');
+        assert.equal(bodies[0].model, 'gemini-4-argon');
         assert.equal(bodies[0].store, false);
         assert.equal(bodies[0].system_instruction, '固定の指示');
         assert.deepEqual(bodies[0].response_format, { type: 'text', mime_type: 'application/json', schema: { type: 'object' } });
         assert.equal('tools' in bodies[0], false);
         await generateGeminiReply({ systemInstruction: '検索指示', input: '{}', search: true }, 'fake-key-for-test');
+        assert.equal(bodies[1].model, 'gemini-3.8-flash');
         assert.deepEqual(bodies[1].tools, [{ type: 'google_search' }]);
         assert.equal('response_format' in bodies[1], false);
-    } finally { globalThis.fetch = original; }
+        assert.deepEqual(timeouts, [30_000, 60_000]);
+    } finally { globalThis.fetch = original; AbortSignal.timeout = originalTimeout; }
 });
 
 test('実SDKの429を再試行せず安全なエラーへ変換する', async () => {
