@@ -14,6 +14,17 @@ function plain(value: string): string {
     }).replace(/\s+/g, ' ').trim();
 }
 
+/** 検索カードの商品画像。AmazonのCDN上のHTTPS画像だけを採用する。 */
+function thumbnail(card: string): string | null {
+    const tag = card.match(/<img\b[^>]*\bclass=["'][^"']*\bs-image\b[^"']*["'][^>]*>/i)?.[0];
+    const src = tag?.match(/\ssrc=["']([^"']+)["']/i)?.[1];
+    if (!src) return null;
+    try {
+        const url = new URL(plain(src));
+        return url.protocol === 'https:' && url.hostname === 'm.media-amazon.com' && !url.port && !url.username ? url.href : null;
+    } catch { return null; }
+}
+
 /** Amazonの検索カードから商品ID・商品名・表示価格を同じカード内で取得する。 */
 export function parseAmazonResults(html: string, minJpy: number, maxJpy: number): GenerationResult {
     const result: GenerationResult = { text: '', search: { queries: [], sources: [], searchSuggestionsHtml: null }, evidence: {}, candidates: [] };
@@ -36,7 +47,7 @@ export function parseAmazonResults(html: string, minJpy: number, maxJpy: number)
         const quote = `${name}。表示価格：￥${price.toLocaleString('en-US')}`;
         result.search!.sources.push({ id, url, title: name });
         result.evidence[id] = [quote];
-        result.candidates!.push({ name, priceJpy: price, productUrl: url, imageUrl: null,
+        result.candidates!.push({ name, priceJpy: price, productUrl: url, imageUrl: thumbnail(card),
             description: name, recommendationReason: 'Amazonで商品と表示価格を確認しました。希望の機能は商品ページで確認してください。', sourceUrls: [url] });
         result.text += `${quote}\n商品ページ：${url}\n`;
         seen.add(asin);

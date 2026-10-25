@@ -822,6 +822,18 @@ test('Amazonの同じ検索カードから商品名・ASIN・現在価格を取�
     assert.doesNotMatch(result.text, /価格のない商品|範囲外|参考価格だけ|重複商品/);
 });
 
+test('Amazonの検索カードの商品画像はAmazonのCDNのHTTPS画像だけを採用する', () => {
+    const img = (src: string) => `<img class="s-image" src="${src}" alt="">`;
+    const html = [
+        amazonCard('B000000001', 'CDN画像', img('https://m.media-amazon.com/images/I/81abc._AC_UL320_.jpg') + amazonPrice(1000)),
+        amazonCard('B000000002', '外部画像', img('https://evil.test/a.jpg') + amazonPrice(1000)),
+        amazonCard('B000000003', 'HTTP画像', img('http://m.media-amazon.com/images/I/a.jpg') + amazonPrice(1000)),
+        amazonCard('B000000004', '画像なし', amazonPrice(1000)),
+    ].join('');
+    assert.deepEqual(parseAmazonResults(html, 800, 1200).candidates?.map(c => c.imageUrl),
+        ['https://m.media-amazon.com/images/I/81abc._AC_UL320_.jpg', null, null, null]);
+});
+
 test('Amazon検索は固定HTTPSホスト・価格帯・リダイレクト禁止・キャンセル信号を使う', async () => {
     const controller = new AbortController();
     let sentSignal: AbortSignal | undefined;
