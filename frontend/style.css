@@ -1440,3 +1440,11 @@ body:has(#content.chat-layout-v3) {
 
 .history-reset { margin-top: 2rem; padding: 1.2rem; border: 1px solid #e9b5b5; border-radius: 1.2rem; }
 .history-reset .btn-pill { color: #9f2424; background: #fff0f0; }
+
+#pairing-dialog .pairing-actions .btn-pill{width:100%;min-height:52px;border-radius:16px;font-size:17px;margin:0}
+.home-return{align-self:center;flex:0 0 auto;min-height:50px;padding:12px 24px;text-decoration:none}
+.interest-picker{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;border:0;padding:0;margin:0}
+.interest-picker legend{margin-bottom:12px;font-weight:700}
+.interest-picker label{display:flex;align-items:center;gap:8px;border:1px solid #b8d6e4;border-radius:14px;padding:12px;cursor:pointer}
+.interest-picker label:has(input:checked){background:#d9f1ff;border-color:#008dcc}
+.interest-picker input{width:20px;height:20px;margin:0;accent-color:#008dcc;flex:none}

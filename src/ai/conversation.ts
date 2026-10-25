@@ -42,11 +42,29 @@ export async function createReply(
         const searchRequested = input.mode === 'consultation' && input.message === CONVERSATION_SEARCH_MESSAGE;
         const request = buildConversationRequest(input);
         if (searchRequested) request.systemInstruction += '\n今回は検索ボタンによる操作です。必ずSEARCHを選び、会話から商品カテゴリ・用途だけの短いsearchQueryを作ってください。条件が不明でも質問せず、近いカテゴリへ広げて検索します。';
-        const generated = input.searchQuery ? { text: JSON.stringify({ action: 'SEARCH', reply: '指定された条件で商品を探します。', searchQuery: input.searchQuery, persuasionText: null, purchaseConditions: [], constraintsSatisfied: false }) } : await generate(request);
-        if (typeof generated.text !== 'string' || !generated.text.trim()) {
-            throw new ConversationError('EMPTY_RESPONSE', 'Geminiから返答がありませんでした。');
+        let decision: ReturnType<typeof parseDecision>;
+        try {
+            const generated = input.searchQuery ? { text: JSON.stringify({ action: 'SEARCH', reply: '指定された条件で商品を探します。', searchQuery: input.searchQuery, persuasionText: null, purchaseConditions: [], constraintsSatisfied: false }) } : await generate(request);
+            if (typeof generated.text !== 'string' || !generated.text.trim()) {
+                throw new ConversationError('EMPTY_RESPONSE', 'Geminiから返答がありませんでした。');
+            }
+            decision = parseDecision(generated.text);
+        } catch (error) {
+            const selected = input.products.find(p => p.id === input.selectedProductId);
+            const failure = toConversationError(error);
+            // A failed AI response must not discard a child's reason. Keep their
+            // exact words as a draft; explicit confirmation and parent review remain required.
+            const priceAge = selected?.priceCheckedAt ? Date.parse(input.now) - Date.parse(selected.priceCheckedAt) : Infinity;
+            if (input.mode !== 'consultation' || input.role !== 'child' || !input.message
+                || searchRequested || input.searchQuery || input.currentProposal || !selected
+                || input.constraints.mustHave.length || input.constraints.mustAvoid.length
+                || selected.priceJpy === null || priceAge < 0 || priceAge > MAX_PRICE_AGE_MS
+                || !['API_ERROR','TIMEOUT','EMPTY_RESPONSE','INVALID_RESPONSE','RATE_LIMIT'].includes(failure.code)) throw error;
+            return { requestId: input.requestId, action: 'PROPOSAL', search: null,
+                reply: 'ほしい りゆうは、この おはなしで あってる？',
+                proposalDraft: { productId: selected.id, target: 'parent', persuasionText: input.message,
+                    purchaseConditions: [], basedOn: null } };
         }
-        const decision = parseDecision(generated.text);
         // 検索ボタンの操作は、モデルが聞き取りを選んでも実際の検索まで進める。
         if (searchRequested) {
             decision.action = 'SEARCH';
@@ -67,7 +85,7 @@ export async function createReply(
                 : found.products.length ? input.role === 'child' ? `${found.products.length}こ見つかったよ！ 気になるものをえらんでね。` : `${found.products.length}件の候補が見つかりました。`
                 : '商品検索に接続できませんでした。もう一度検索してください。';
             if (!found.products.length) return { ...base, action: 'HEARING', search: found.search, reply: consultation };
-            return { ...base, action: 'PRODUCT', ...found, reply: `${consultation} ${input.role === 'child' ? 'ねだんは変わることもあるよ。' : '表示価格は検索時の参考価格です。'}` };
+            return { ...base, action: 'PRODUCT', ...found, reply: input.role === 'child' ? consultation : `${consultation} 表示価格は検索時の参考価格です。` };
         }
         const current = input.currentProposal;
         const productId = input.selectedProductId ?? current?.productId;
