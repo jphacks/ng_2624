@@ -214,8 +214,8 @@ test('current device uses logout while other connections use revocation',async()
 test('failed device revocation shows the reason and brings it into view',async()=>{
  const ui=await frontend(basic);
  let scrolled=false;ui.nodes['#notice'].scrollIntoView=()=>{scrolled=true;};
- await ui.run(async()=>{throw Object.assign(new Error('安全のためGoogleで本人確認をしてください。'),{code:'REAUTH_REQUIRED',status:403});});
- assert.match(ui.nodes['#notice'].textContent,/Googleで本人確認/);
+ await ui.run(async()=>{throw Object.assign(new Error('接続を解除できませんでした。'),{code:'FORBIDDEN',status:403});});
+ assert.match(ui.nodes['#notice'].textContent,/接続を解除できませんでした/);
  assert.equal(scrolled,true);
  assert.equal(ui.state.session.authenticated,true);
 });

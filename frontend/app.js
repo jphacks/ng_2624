@@ -175,7 +175,7 @@ function canLeave(){return !state.dirty||confirm('提案の編集内容が未保
 async function go(hash){if(!canLeave())return;history.pushState(null,'',hash);return navigate();}
 async function navigate(preserveScroll=false){state.routeHash=location.hash;const epoch=++state.epoch,position=preserveScroll?{left:window.scrollX,top:window.scrollY,behavior:'instant'}:null;if(!preserveScroll)render('<p>読み込んでいます…</p>');try{await route();if(position&&epoch===state.epoch)window.scrollTo(position);}catch(e){if(!e.stale)await error(e);}}
 
-async function error(e){if(e.stale){if(e.completed)notice('前の画面の操作が完了しました。最新の状態に更新して確認してください。');return;}notice(e.message||'処理に失敗しました。',true);if(e.code==='PAIRING_EXPIRED'){state.pairingId=null;sessionStorage.removeItem('pairingRequestId');welcome();}else if(e.status===401){state.session={authenticated:false,demo:state.session?.demo};API.clear();welcome();}if(e.code==='CSRF_INVALID')await api('/auth/session');if(e.code==='REAUTH_REQUIRED')$('#notice').insertAdjacentHTML('beforeend',btn('Googleで本人確認する','reauth'));if(['VERSION_CONFLICT','INVALID_STATE','CONFLICT'].includes(e.code))$('#notice').insertAdjacentHTML('beforeend',btn('最新の状態を確認','reload'));}
+async function error(e){if(e.stale){if(e.completed)notice('前の画面の操作が完了しました。最新の状態に更新して確認してください。');return;}notice(e.message||'処理に失敗しました。',true);if(e.code==='PAIRING_EXPIRED'){state.pairingId=null;sessionStorage.removeItem('pairingRequestId');welcome();}else if(e.status===401){state.session={authenticated:false,demo:state.session?.demo};API.clear();welcome();}if(e.code==='CSRF_INVALID')await api('/auth/session');if(['VERSION_CONFLICT','INVALID_STATE','CONFLICT'].includes(e.code))$('#notice').insertAdjacentHTML('beforeend',btn('最新の状態を確認','reload'));}
 async function run(task,source){
  if(state.busy){notice('前の操作を処理中です。完了後にもう一度操作してください。');return;}
  state.busy=true;
@@ -194,7 +194,6 @@ function guidelines(f){const g={smallJpy:amount(f.smallJpy),mediumJpy:amount(f.m
 async function action(a,id){
  if(a==='reload'){if(!canLeave())return;return navigate(true);}
  if(a==='logout'){if(!parent())throw new Error('子どもの端末の接続解除は、保護者の設定から行ってください。');await api('/auth/logout','POST',{});API.clear();sessionStorage.removeItem('pairingRequestId');state.session={authenticated:false,demo:state.session?.demo};state.pairingId=null;state.childId=null;state.chat=null;state.dashboard=null;return go('#start');}
- if(a==='reauth'){const r=await api('/auth/google/reauthenticate','POST',{});if(!url(r.authorizationUrl)&&!(state.session?.demo&&new URL(r.authorizationUrl).origin===location.origin))throw new Error('認証先URLを確認できません。');location.assign(r.authorizationUrl);return;}
  if(a==='child-home')return go('#child-home/'+path(id));
  if(a==='child-settings')return go('#child-settings/'+id);
  if(a==='invite'){state.invitation=await api('/children/'+path(id)+'/invitations','POST',{});return go('#invitation/'+id);}

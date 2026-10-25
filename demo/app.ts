@@ -52,16 +52,6 @@ export async function createDemo(config: Config, dependencies: Dependencies) {
       assert(!resetting, 409, 'DEMO_BUSY', 'リセット中です。少し待ってください。');
       const path = new URL(request.url).pathname;
       if (path === '/api/auth/google/start' && request.method === 'GET') return Response.redirect(config.origin + '/demo', 302);
-      if (path === '/api/auth/google/reauthenticate' && request.method === 'POST') {
-        // Preserve normal session/CSRF/role checks, but never start upstream OAuth.
-        const response = await current.app(new Request(config.origin + '/api/auth/session', { headers: request.headers }), remoteAddress);
-        const { data } = await response.json();
-        assert(data.authenticated && data.user.role === 'parent', 403, 'FORBIDDEN');
-        protectMutation(request, config, data.csrfToken);
-        const token = cookies(request)[cookieName(config, 'session')];
-        await current.db.update('app_sessions', { token_hash: 'eq.' + hash(token) }, { reauthenticated_at: new Date().toISOString() });
-        return json({ authorizationUrl: config.origin + '/#children' });
-      }
       if (path.startsWith('/api/demo/')) {
         const jar = cookies(request), headers = new Headers();
         let control = unseal(jar[cookieName(config, 'control')] || '', controlSecret);
@@ -81,7 +71,7 @@ export async function createDemo(config: Config, dependencies: Dependencies) {
           const old = jar[cookieName(config, 'session')];
           if (old) await current.db.update('app_sessions', { token_hash: 'eq.' + hash(old) }, { revoked_at: new Date().toISOString() });
           const token = randomToken(), userId = body.role === 'parent' ? current.parentId : current.childId;
-          await current.db.insert('app_sessions', { token_hash: hash(token), user_id: userId, csrf_token: randomToken(), expires_at: new Date(Date.now() + 7 * DAY).toISOString(), reauthenticated_at: body.role === 'parent' ? new Date().toISOString() : null, device_label: 'ローカルデモ' });
+          await current.db.insert('app_sessions', { token_hash: hash(token), user_id: userId, csrf_token: randomToken(), expires_at: new Date(Date.now() + 7 * DAY).toISOString(), device_label: 'ローカルデモ' });
           headers.append('Set-Cookie', cookie(config, 'session', token));
           headers.append('Set-Cookie', cookie(config, 'pair', '', 0));
           return json({ loggedIn: true }, 200, headers);
