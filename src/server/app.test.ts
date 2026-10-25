@@ -214,6 +214,15 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   assert.equal(revoked.status,200);assert.equal(revoked.data.revoked,true);assert.equal(revoked.data.currentDeviceRevoked,false);
   assert.ok((await db.list('app_sessions',{token_hash:'eq.'+target.token_hash}))[0].revoked_at);
  });
+ await t.test('history reset requires a parent, CSRF and explicit confirmation',async()=>{
+  await db.update('app_sessions',{token_hash:'eq.'+hash(tokenChild)},{revoked_at:null});
+  assert.equal((await call('/history','DELETE',{confirmation:'DELETE_ALL_HISTORY'})).status,403);
+  assert.equal((await call('/history','DELETE',{},'parent')).status,400);
+  assert.equal((await call('/history','DELETE',{confirmation:'DELETE_ALL_HISTORY'},'parent','wrong')).status,403);
+  const cleared=await call('/history','DELETE',{confirmation:'DELETE_ALL_HISTORY'},'parent');assert.equal(cleared.status,200,JSON.stringify(cleared));assert.equal(cleared.data.cleared,true);
+  assert.equal((await call('/auth/session','GET',undefined,'parent')).data.authenticated,true);
+  const dash=await call('/dashboard');assert.equal(dash.data.balanceYen,0);assert.deepEqual(dash.data.proposals,[]);assert.deepEqual(dash.data.chores,[]);
+ });
  await t.test('parent can log out without reauthentication',async()=>{
   await db.update('app_sessions',{token_hash:'eq.'+hash(tokenParent)},{reauthenticated_at:null});
   const loggedOut=await call('/auth/logout','POST',{},'parent');

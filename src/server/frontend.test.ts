@@ -663,3 +663,18 @@ test('automatic refresh defers DOM replacement during Japanese composition',asyn
  assert.equal(ui.nodes['#content'].innerHTML,before);
  ui.events.compositionend();await ui.refreshVisible();assert.match(ui.nodes['#content'].innerHTML,/654/);
 });
+
+
+test('history clear is at the bottom of parent settings, confirms once and sends nothing on cancel',async()=>{
+ let accepts=false,confirmations=0;const writes:any[]=[];
+ const ui=await frontend(async(path,method='GET',body)=>{
+  if(method!=='GET')writes.push({path,method,body});
+  if(path==='/profile')return {displayName:'親'};if(path==='/devices')return {devices:[]};if(path==='/pairing/requests')return {requests:[]};if(path==='/history')return {cleared:true};return basic(path);
+ },message=>{confirmations++;assert.match(message,/元に戻せません/);return accepts;});
+ await ui.go('#settings');const html=ui.nodes['#content'].innerHTML;
+ assert(html.indexOf('履歴の全消去')>html.indexOf('接続中の端末'));
+ ui.state.chat={conversationId:'old'};await ui.action('clear-history');assert.equal(writes.length,0);assert.equal(confirmations,1);assert.equal(ui.state.chat.conversationId,'old');
+ accepts=true;await ui.action('clear-history');assert.equal(confirmations,2);assert.equal(writes.length,1);assert.equal(writes[0].path,'/history');assert.equal(writes[0].method,'DELETE');assert.equal(writes[0].body.confirmation,'DELETE_ALL_HISTORY');assert.equal(ui.state.chat,null);assert.match(ui.nodes['#notice'].textContent,/消去しました/);
+ ui.state.session={...session,user:{...session.user,role:'child'}};await ui.go('#settings');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/clear-history/);
+ await assert.rejects(ui.action('clear-history'),/保護者/);
+});
