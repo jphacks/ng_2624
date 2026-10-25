@@ -265,7 +265,7 @@ export function createApp(config: Config, dep: Dependencies) {
       if (path === '/api/pairing/requests' && method === 'POST' || pairStatus && (method === 'GET' || pairStatus[2] && method === 'POST')) {
         const pair = unseal(jar[cookieName(config, 'pair')] || '', config.sessionSecret); assert(pair, 401, 'PAIRING_EXPIRED', '招待コードを入力し直してください。');
         if (method === 'POST') protectMutation(request, config, pair.csrf);
-        rate(`pair:${remoteAddress}`, 30, 600000);
+        if(method==='GET')rate(`pair-status:${hash(pair.token)}`,90,60000);else rate(`pair:${remoteAddress}`,30,600000);
         let r: Row;
         if (!pairStatus || pairStatus[2]) assert(!(await loadSession(false)), 409, 'ALREADY_AUTHENTICATED', 'ログイン中です。子どもの別ブラウザーまたは別端末で招待を開いてください。');
         if (!pairStatus) { const token = text(body.invitationToken, 200).replace(/[\s-]/g, '').toUpperCase(); assert(/^[A-Z2-9]{12}$/.test(token), 400, 'INVALID_INPUT', '招待コードは12文字の英数字です。6桁の確認番号とは異なります。'); r = await db.rpc('wb_request_pairing', { p_invitation_hash: hash(token), p_token_hash: hash(pair.token) }); }
@@ -276,7 +276,7 @@ export function createApp(config: Config, dep: Dependencies) {
           const token = randomToken(); const s = await db.rpc('wb_complete_pairing', { p_request_id: r.id, p_token_hash: hash(pair.token), p_session_token_hash: hash(token), p_csrf_token: randomToken() });
           setCookie('session', token, 30 * 86400); setCookie('pair', '', 0); return result(sessionView({ row: s, user: child }));
         }
-        return result({ pairingRequestId: r.id, childId: inv.child_id, childDisplayName: child.display_name, status: Date.parse(r.expires_at) <= Date.now() || Date.parse(inv.expires_at) <= Date.now() ? 'expired' : r.status, confirmationCode: r.confirmation_code, expiresAt: r.expires_at, csrfToken: pair.csrf });
+        return result({ pairingRequestId: r.id, childId: inv.child_id, childDisplayName: child.display_name, status: Date.parse(r.expires_at) <= Date.now() || Date.parse(inv.expires_at) <= Date.now() ? 'expired' : r.status, confirmationCode: r.confirmation_code, expiresAt: r.expires_at, ...(method==='POST'?{csrfToken:pair.csrf}:{}) });
       }
       const session = (await loadSession())!, user = session.user;
       if (method !== 'GET') protectMutation(request, config, session.row.csrf_token);

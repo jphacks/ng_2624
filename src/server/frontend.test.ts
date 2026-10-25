@@ -525,7 +525,7 @@ test('incoming pairing opens a number entry dialog without navigating and preser
  const content=ui.nodes['#content'].innerHTML;
  pending=true;await ui.checkPairingRequests();
  const dialog=ui.nodes['#pairing-dialog'];
- assert.equal(dialog.open,true);assert.match(dialog.innerHTML,/6桁の確認番号/);
+ assert.equal(dialog.open,true);assert.match(dialog.innerHTML,/6桁の確認番号/);assert.doesNotMatch(dialog.innerHTML,/あとで確認する|pairing-later/);
  assert.doesNotMatch(dialog.innerHTML,/123456/);
  dialog.innerHTML+='entered-input';await ui.checkPairingRequests();assert.match(dialog.innerHTML,/entered-input/);
  assert.equal(ui.nodes['#content'].innerHTML,content);assert.equal(ui.location.hash,'#home');
@@ -533,7 +533,7 @@ test('incoming pairing opens a number entry dialog without navigating and preser
  assert.deepEqual(writes.map(x=>({...x})),[{decision:'approved',confirmationCode:'123456'}]);
  assert.equal(dialog.open,false);assert.match(ui.nodes['#notice'].textContent,/承認しました/);
 });
-test('pairing failure stays in the dialog and later defers only that request',async()=>{
+test('pairing failure stays in the dialog until answered or removed',async()=>{
  let requests=[pairingRequest];
  const ui=await frontend(async(path,method)=>{
   if(path==='/pairing/requests')return {requests};
@@ -544,7 +544,7 @@ test('pairing failure stays in the dialog and later defers only that request',as
  await ui.run(()=>ui.submit('pair-respond-modal','pair-1',{confirmationCode:'654321'}),source);
  assert.equal(ui.nodes['#pairing-dialog'].open,true);
  assert.match(ui.nodes['#pairing-error'].textContent,/確認番号が違います/);
- await ui.action('pairing-later');await ui.checkPairingRequests();
+ requests=[];await ui.checkPairingRequests();
  assert.equal(ui.nodes['#pairing-dialog'].open,false);
  requests=[{...pairingRequest,pairingRequestId:'pair-2'}];await ui.checkPairingRequests();
  assert.equal(ui.nodes['#pairing-dialog'].open,true);assert.match(ui.nodes['#pairing-dialog'].innerHTML,/pair-2/);
@@ -684,7 +684,7 @@ test('pairing uses automatic dialog without a duplicate settings section or manu
  let pending=false;const ui=await frontend(async path=>{if(path==='/profile')return {displayName:'親'};if(path==='/devices')return {devices:[]};if(path==='/pairing/requests')return {requests:pending?[pairingRequest]:[]};if(path==='/children/child/invitations')return {childId:'child',invitationToken:'ABCDEFGH2345'};return basic(path);});
  await ui.go('#settings');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/子どもの端末の接続申請|接続申請はありません|data-form="pair-respond"/);
  assert.match(ui.nodes['#content'].innerHTML,/接続中の端末/);assert.match(ui.nodes['#content'].innerHTML,/履歴の全消去/);
- await ui.action('invite','child');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/接続申請を確認する/);assert.match(ui.nodes['#content'].innerHTML,/画面が自動で開きます/);
+ await ui.action('invite','child');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/接続申請を確認する/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/接続申請が届くと/);
  pending=true;await ui.checkPairingRequests();assert.equal(ui.nodes['#pairing-dialog'].open,true);assert.match(ui.nodes['#pairing-dialog'].innerHTML,/6桁の確認番号/);
  await ui.go('#children');assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
 });
@@ -733,4 +733,12 @@ test('chat Enter submits once; Shift+Enter, IME confirmation and non-chat fields
  key({repeat:true});ui.state.busy=true;key();ui.state.busy=false;input.value='  ';key();assert.equal(submits,1);
  key({target:{...input,value:'設定欄',closest:()=>null}});assert.equal(submits,1);
  input.value='つづき';key();assert.equal(submits,2);
+});
+
+
+test('pairing confirmation uses one plain explanation and a clear completion button',async()=>{
+ let approved=false;const ui=await frontend(async path=>{if(path==='/pairing/session')return {};if(path==='/pairing/requests/pair-1')return {...pairingRequest,status:approved?'approved':'pending'};return basic(path);});
+ ui.state.session={authenticated:false};ui.state.pairingId='pair-1';await ui.go('#pairing');
+ let html=ui.nodes['#content'].innerHTML;assert.match(html,/おうちの人に確認してもらおう/);assert.match(html,/保護者に、この6桁の確認番号/);assert.match(html,/保護者の承認を待っています/);assert.doesNotMatch(html,/①|②|せつぞくを|おへんじ|じどう/);
+ approved=true;await ui.refreshVisible();html=ui.nodes['#content'].innerHTML;assert.match(html,/接続を完了する/);assert.doesNotMatch(html,/せつぞくを おわる/);
 });

@@ -37,7 +37,7 @@ const reloadBtn=()=>'';
 const choreTone=v=>['approved','completed','paid'].includes(v)?'is-approved':['rejected','revision_requested'].includes(v)?'is-rejected':v==='submitted'?'is-waiting':'';
 const state={session:null,childId:null,dashboard:null,chat:null,proposal:null,busy:false,loading:true,canNegotiate:false,epoch:0,dirty:false,routeHash:location.hash,invitation:null,goalOrder:[],pairingId:sessionStorage.getItem('pairingRequestId')};
 const parent=()=>state.session?.user?.role==='parent';
-const pairingMonitor={checking:false,dismissed:new Set(),deferredUntil:new Map(),request:null,focus:null};
+const pairingMonitor={checking:false,dismissed:new Set(),request:null,focus:null};
 function closePairingDialog(){
  const dialog=$('#pairing-dialog');
  if(dialog?.open)dialog.close();
@@ -47,7 +47,7 @@ function closePairingDialog(){
 function showPairingDialog(request){
  const dialog=$('#pairing-dialog');if(!dialog||dialog.open)return;
  pairingMonitor.request=request;pairingMonitor.focus=document.activeElement;
- dialog.innerHTML=`<h2 id="pairing-title">子どもの端末を承認</h2><p id="pairing-description">${esc(request.childDisplayName)}の端末から接続申請が届きました。子どもの画面に表示されている6桁の確認番号を入力してください。</p><p>期限：${esc(date(request.expiresAt))}</p><p id="pairing-error" class="form-error" role="alert"></p>${form('pair-respond-modal',`<label class="field-label">6桁の確認番号<input name="confirmationCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required autofocus></label>`,'この端末を承認する',request.pairingRequestId)}<div class="pairing-actions">${btn('この申請を拒否する','pairing-reject',request.pairingRequestId)}${btn('あとで確認する','pairing-later')}</div>`;
+ dialog.innerHTML=`<h2 id="pairing-title">子どもの端末を承認</h2><p id="pairing-description">${esc(request.childDisplayName)}の端末から接続申請が届きました。子どもの画面に表示されている6桁の確認番号を入力してください。</p><p>期限：${esc(date(request.expiresAt))}</p><p id="pairing-error" class="form-error" role="alert"></p>${form('pair-respond-modal',`<label class="field-label">6桁の確認番号<input name="confirmationCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required autofocus></label>`,'この端末を承認する',request.pairingRequestId)}<div class="pairing-actions">${btn('この申請を拒否する','pairing-reject',request.pairingRequestId)}</div>`;
  dialog.showModal();
 }
 async function checkPairingRequests(){
@@ -59,7 +59,7 @@ async function checkPairingRequests(){
   if(state.session!==session||!parent())return;
   const pending=(data.requests||[]).filter(r=>r.status==='pending'&&Date.parse(r.expiresAt)>Date.now());
   const ids=new Set(pending.map(r=>r.pairingRequestId));
-  for(const id of pairingMonitor.dismissed)if(!ids.has(id)||Date.now()>=(pairingMonitor.deferredUntil.get(id)||Infinity)){pairingMonitor.dismissed.delete(id);pairingMonitor.deferredUntil.delete(id);}
+  for(const id of pairingMonitor.dismissed)if(!ids.has(id))pairingMonitor.dismissed.delete(id);
   if(pairingMonitor.request&&!ids.has(pairingMonitor.request.pairingRequestId))closePairingDialog();
   if(!state.busy){const next=pending.find(r=>!pairingMonitor.dismissed.has(r.pairingRequestId));if(next)showPairingDialog(next);}
  }catch(e){if(e.status===401)closePairingDialog();}
@@ -69,7 +69,7 @@ async function respondPairingDialog(id,decision,confirmationCode){
  if(pairingMonitor.request?.pairingRequestId!==id)return;
  await API.request('/pairing/requests/'+path(id)+'/responses','POST',{decision,...(decision==='approved'?{confirmationCode}:{})});
  pairingMonitor.dismissed.add(id);closePairingDialog();
- notice(decision==='approved'?'端末を承認しました。子どもの端末に承認が自動で届きます。「せつぞくを おわる」を押して完了してください。':'接続申請を拒否しました。');
+ notice(decision==='approved'?'端末を承認しました。子どもの端末に承認が自動で届きます。「接続を完了する」を押してください。':'接続申請を拒否しました。');
 }
 function notice(text='',error=false){$('#notice').textContent=text;$('#notice').className=error?'global-notice form-error':'global-notice';}
 const viewCache=new Map();let cacheSession=null,backgroundEpoch=null,refreshPending=false,lastRendered=null,composing=false;
@@ -269,9 +269,9 @@ async function children(){
 }
 async function childSettings(id){const [list,s]=await Promise.all([api('/children'),api('/children/'+encodeURIComponent(id)+'/settings')]);const c=list.children.find(x=>x.childId===id);if(!c)throw new Error('子どもが見つかりません。');state.childRecords=list.children;render(`<a href="#children">← 子ども一覧</a><h1>${esc(c.displayName)}の設定</h1>${form('child-info',childFields(c),'子どもの情報を保存',id)}${form('child-settings',area('購入の条件（1行に1つ）','mustHave',(s.constraints?.mustHave||[]).join('\n'))+area('避けたいもの（1行に1つ）','mustAvoid',(s.constraints?.mustAvoid||[]).join('\n')),'条件を保存',id)}${btn('端末をつなぎ直す','invite',id)}<section class="history-reset"><h2>子どもの登録を削除</h2><p>この子の会話・目標・お手伝い・ポイント・端末接続も削除します。元に戻せません。</p>${btn('この子どもの登録・履歴を削除する','delete-child',id)}</section>`);}
 async function settings(){if(!parent()){const p=await api('/profile');return render(`<h1>じぶんの設定</h1><p>${esc(p.displayName)}の好きなことを更新できるよ。</p>${form('child-profile',area('好きなこと（1行に1つ）','interests',(p.profile?.preferences?.interests||[]).join('\n')),'保存する')}`);}const [p,devices]=await Promise.all([api('/profile'),api('/devices')]);render(`<h1>保護者の設定</h1>${form('profile',field('お名前','displayName',p.displayName,'text',true)+field('誕生日','birthDate',p.birthDate||'','date',true)+gender(p.profile?.gender))}<section><h2>接続中の端末</h2>${devices.devices.map(d=>`<article class="flow-card"><h3>${d.childDisplayName?esc(d.childDisplayName)+'：':''}${esc(d.deviceLabel)}${d.isCurrent?'（この端末）':''}</h3><p>${esc(date(d.lastActiveAt))}</p>${d.isCurrent?btn('この端末からログアウト','logout'):btn('この接続を解除','revoke-device',d.deviceSessionId)}</article>`).join('')}</section><section class="history-reset"><h2>履歴の全消去</h2><p>家族全員の会話・おねがい・目標・お手伝い・ポイントをすべて消去します。アカウント・家族登録・設定・端末接続は残ります。消去した履歴は元に戻せません。</p>${btn('履歴をすべて消去する','clear-history')}</section>`);}
-function invitation(id){const d=state.invitation;if(!d||d.childId!==id)return render(`<a href="#children">← 子ども一覧</a><p>招待を表示するには、子ども一覧から招待を発行してください。</p>`);if(d.connected)return render('<h1>端末の接続が完了しました</h1><p>子どもの端末で、ぽぽとの相談を始められます。</p><a class="btn-primary" href="#children">子ども一覧へ</a>');const src=typeof d.qrDataUrl==='string'&&d.qrDataUrl.startsWith('data:image/png;base64,')?d.qrDataUrl:'';render(`<a href="#children">← 子ども一覧</a><h1>子どもの端末をつなぐ</h1><p>子どもの端末でQRを読み取るか、最初の画面で招待コードを入力してください。</p>${src?`<img class="pair-qr" src="${esc(src)}" alt="子どもの端末で読み取る招待QR">`:''}<p class="confirmation-code">${esc(d.invitationToken)}</p><p>期限：${esc(date(d.expiresAt))}</p><p>接続申請が届くと、確認番号を入力する画面が自動で開きます。子どもの画面の番号を入力して承認してください。</p>`);}
+function invitation(id){const d=state.invitation;if(!d||d.childId!==id)return render(`<a href="#children">← 子ども一覧</a><p>招待を表示するには、子ども一覧から招待を発行してください。</p>`);if(d.connected)return render('<h1>端末の接続が完了しました</h1><p>子どもの端末で、ぽぽとの相談を始められます。</p><a class="btn-primary" href="#children">子ども一覧へ</a>');const src=typeof d.qrDataUrl==='string'&&d.qrDataUrl.startsWith('data:image/png;base64,')?d.qrDataUrl:'';render(`<a href="#children">← 子ども一覧</a><h1>子どもの端末をつなぐ</h1><p>子どもの端末でQRを読み取るか、最初の画面で招待コードを入力してください。</p>${src?`<img class="pair-qr" src="${esc(src)}" alt="子どもの端末で読み取る招待QR">`:''}<p class="confirmation-code">${esc(d.invitationToken)}</p><p>期限：${esc(date(d.expiresAt))}</p>`);}
 async function pair(token){if(state.session?.authenticated)throw new Error('ログイン中です。子どもの別端末または別ブラウザーで招待を開いてください。');token=token.normalize('NFKC').replace(/[\s-]/g,'').toUpperCase();if(!/^[A-Z2-9]{12}$/.test(token))throw new Error('招待コードは12文字の英数字です。6桁の確認番号とは異なります。');await api('/pairing/session','POST',{invitationToken:token});const p=await api('/pairing/requests','POST',{invitationToken:token});state.pairingId=p.pairingRequestId;sessionStorage.setItem('pairingRequestId',p.pairingRequestId);pairView(p);}
-function pairView(p){render(`<h1>おうちの人に確認してもらおう</h1><p>${esc(p.childDisplayName)}の端末として接続します。</p><p class="confirmation-code">${esc(p.confirmationCode)}</p><p>① おうちの人の画面に出る確認画面で、この6桁の番号を入力して承認してもらいます。<br>② おへんじは じどうで とどくよ。「せつぞくを おわる」を おしてね。</p><p>${esc(status(p.status))} ・期限 ${esc(date(p.expiresAt))}</p>${p.status==='approved'?btn('せつぞくを おわる','pairing-complete'):p.status==='pending'?'<p>おうちのひとの おへんじを まっているよ…</p>':'<a href="#start">新しい招待ではじめる</a>'}`);}
+function pairView(p){render(`<h1>おうちの人に確認してもらおう</h1><p>${esc(p.childDisplayName)}の端末として接続します。</p><p class="confirmation-code">${esc(p.confirmationCode)}</p><p>保護者に、この6桁の確認番号を入力して承認してもらってください。</p><p>${esc(status(p.status))} ・期限 ${esc(date(p.expiresAt))}</p>${p.status==='approved'?btn('接続を完了する','pairing-complete'):p.status==='pending'?'<p>保護者の承認を待っています。</p>':'<a href="#start">新しい招待ではじめる</a>'}`);}
 async function route(){if(backgroundEpoch!==state.epoch)notice();nav();if(!state.session?.authenticated){if(state.pairingId&&location.hash==='#pairing'){await api('/pairing/session','POST',{});return pairView(await api('/pairing/requests/'+encodeURIComponent(state.pairingId)));}return welcome();}if(state.session.user.onboardingCompleted===false)return onboarding();const [view,id]=location.hash.slice(1).split('/');if(view==='requests')return requests();if(view==='chores')return chores();if(view==='conversations')return conversations();if(view==='conversation'&&id)return chat(id);if(view==='negotiation'&&id)return negotiation(id);if(view==='proposal'&&id)return proposal(id);if(view==='child-home'&&id&&parent()){if(state.childId!==id)state.goalOrder=[];state.childId=id;return home();}if(view==='children')return children();if(view==='child-settings'&&id&&parent())return childSettings(id);if(view==='settings')return settings();if(view==='invitation'&&id&&parent())return invitation(id);return parent()?children():home();}
 function canLeave(){return !state.dirty||confirm('提案の編集内容が未保存です。保存せず移動しますか？');}
 async function go(hash){if(!canLeave())return;history.pushState(null,'',hash);return navigate();}
@@ -308,7 +308,6 @@ const due=value=>value?new Date(value+'T23:59:59').toISOString():null;
 function amount(value){const n=Number(value);if(value===''||!Number.isSafeInteger(n)||n<0||n%10!==0)throw new Error('ポイントは0以上、10単位で入力してください。');return n;}
 function identity(f){return {displayName:f.displayName.trim(),birthDate:f.birthDate,gender:f.gender||null,gradeLevel:f.gradeLevel?Number(f.gradeLevel):null,gradeBaseSchoolYear:new Date().getFullYear()-(new Date().getMonth()<3?1:0)};}
 async function action(a,id){
- if(a==='pairing-later'){if(pairingMonitor.request){pairingMonitor.dismissed.add(pairingMonitor.request.pairingRequestId);pairingMonitor.deferredUntil.set(pairingMonitor.request.pairingRequestId,Date.now()+30000);}return closePairingDialog();}
  if(a==='pairing-reject')return respondPairingDialog(id,'rejected');
  if(a==='reload'){if(!canLeave())return;return navigate(true);}
  if(a==='logout'){if(!parent())throw new Error('子どもの端末の接続解除は、保護者の設定から行ってください。');await api('/auth/logout','POST',{});API.clear();sessionStorage.removeItem('pairingRequestId');state.session={authenticated:false,demo:state.session?.demo};state.pairingId=null;state.childId=null;state.chat=null;state.dashboard=null;return go('#start');}
@@ -405,7 +404,7 @@ document.addEventListener('change',e=>{if(e.target.id==='child-selector'){state.
 document.addEventListener('error',e=>{if(e.target.matches?.('.product-image')){e.target.hidden=true;const fallback=e.target.nextElementSibling;if(fallback)fallback.hidden=false;}},true);
 window.addEventListener('hashchange',()=>{if(!canLeave()){history.replaceState(null,'',state.routeHash||'#home');return;}void navigate();});
 async function initialize(){loading();state.session=await api('/auth/session');const token=new URLSearchParams(location.hash.slice(1)).get('invitationToken');if(token){if(state.session.authenticated){history.replaceState(null,'','#home');await route();notice('ログイン中です。子どもの別端末または別ブラウザーで招待を開いてください。',true);return;}history.replaceState(null,'','/pairing');await pair(token);history.replaceState(null,'','#pairing');return;}if(new URLSearchParams(location.search).has('authError')){history.replaceState(null,'',location.pathname+location.hash);await route();notice('ログインできませんでした。もう一度お試しください。',true);return;}await route();}
-$('#pairing-dialog')?.addEventListener('cancel',e=>{e.preventDefault();if(!state.busy){if(pairingMonitor.request){pairingMonitor.dismissed.add(pairingMonitor.request.pairingRequestId);pairingMonitor.deferredUntil.set(pairingMonitor.request.pairingRequestId,Date.now()+30000);}closePairingDialog();}});
+$('#pairing-dialog')?.addEventListener('cancel',e=>{e.preventDefault();});
 document.addEventListener('compositionstart',()=>{composing=true;});
 document.addEventListener('compositionend',()=>{composing=false;});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden'){void refreshVisible();void checkPairingRequests();}});
