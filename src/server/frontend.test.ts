@@ -953,3 +953,15 @@ test('結論の送信失敗時には入力画面を保ち、終了結果を表�
  await ui.go('#negotiation-decision/shared');await assert.rejects(ui.submit('decide-negotiation','shared',{decision:'approved',reason:'OK'}),/版が更新/);
  assert.equal(ui.location.hash,'#negotiation-decision/shared');assert.match(ui.nodes['#content'].innerHTML,/data-form="decide-negotiation"/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/class="decision-result"/);
 });
+
+test('共有相談は入力を待たず案内と保護者の返答に沿った問いかけを2つ続けて表示する',async()=>{
+ for(const role of ['parent','child']){
+  let writes=0;
+  const thread={mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,products:[],messages:[],currentProposal:{persuasionText:'遊びたい'},proposalView:{negotiationResult:{reason:'ほんとに続けられるの？ <確認>'}}};
+  const ui=await frontend(async(path,method)=>{if(method&&method!=='GET')writes++;return path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/negotiations/shared'?thread:basic(path);});
+  await ui.go('#negotiation/shared');const html=ui.nodes['#content'].innerHTML;
+  assert.equal((html.match(/class="chat-message assistant"/g)||[]).length,2);assert.match(html,/ほんとに続けられるの？ &lt;確認&gt;/);assert.equal(writes,0);
+  assert.match(html,role==='child'?/これを きいて、どう おもった？/:/お子さんの気持ちも聞きながら/);
+  await ui.refreshVisible();assert.equal((ui.nodes['#content'].innerHTML.match(/class="chat-message assistant"/g)||[]).length,2);
+ }
+});
