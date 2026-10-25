@@ -110,6 +110,8 @@ test('child proposal journey, gated parent negotiation, private drafts, agreemen
    next=await okay(child,base+'/proposal-drafts','POST',{});next=await okay(child,base+'/confirm-reason','POST',{reasonSummary:next.reasonSummary});const draft=next.currentProposal;
    const sent=await okay(child,'/proposals/'+draft.id+'/send','POST',{version:draft.version});
    const answered=await okay(parent,'/proposals/'+draft.id+'/responses','POST',{version:draft.version,decision:'revision_requested',reason:'購入について相談したい'});
+   assert((await okay(parent,'/proposals/received')).proposals.some((v:any)=>v.proposal.id===draft.id));
+   await okay(child,'/negotiations/'+sent.negotiationId+'/messages','POST',{message:'続けたいです'});
    await okay(parent,'/negotiations/'+sent.negotiationId+'/decision','POST',{version:draft.version,decision:'rejected',reason:'今回は購入しません'});
    const concluded=await okay(parent,'/proposals/'+draft.id);
    assert.equal(concluded.negotiationStatus,'closed');assert.equal(concluded.canConsult,false);
@@ -119,6 +121,18 @@ test('child proposal journey, gated parent negotiation, private drafts, agreemen
    assert.equal((await parent.call('/negotiations/'+sent.negotiationId+'/messages','POST',{message:'再開できない'})).status,409);
    await assert.rejects(demo.db.rpc('wb_begin_negotiation_ai',{p_actor_id:parentUser.id,p_negotiation_id:sent.negotiationId,p_lock_id:randomUUID()}),/phase/);
    assert.equal((await okay(child,'/dashboard')).goals.length,1);
+   for(const viewer of [parent,child]){
+    const home=await okay(viewer,'/dashboard?childId='+childUser.id);
+    assert(!home.proposals.some((v:any)=>v.proposal.id===draft.id));
+    assert.equal(home.goals.length,1);
+    const shared=await okay(viewer,'/negotiations');
+    assert(!shared.negotiations.some((n:any)=>n.negotiationId===sent.negotiationId));
+    assert(shared.negotiations.some((n:any)=>n.negotiationId===nId));
+   }
+   assert(!(await okay(parent,'/proposals/received')).proposals.some((v:any)=>v.proposal.id===draft.id));
+   const history=await okay(child,'/conversations');
+   assert(!history.conversations.some((chat:any)=>chat.conversationId===next.conversationId));
+   assert(history.conversations.some((chat:any)=>chat.conversationId===c.conversationId));
   });
  } finally {await demo.close();}
 });

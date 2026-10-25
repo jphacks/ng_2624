@@ -133,7 +133,17 @@ export function createApp(config: Config, dep: Dependencies) {
     const chats = await db.list('conversations', { user_id: eq(user.id), child_id: eq(childId) });
     const drafts = chats.length ? await db.list('proposals', { conversation_id: listOf(chats.map(x => x.id)), proposed_by: eq(user.id), status: 'eq.draft', order: 'created_at.desc', limit: '100' }) : [];
     const child = await one('users', { id: eq(childId) });
-    return Promise.all([...drafts, ...list].map(async p => ({ ...await proposalView(user, p), childId, childDisplayName: child.display_name })));
+    const views: Row[] = await Promise.all([...drafts, ...list].map(async p => ({ ...await proposalView(user, p), childId, childDisplayName: child.display_name })));
+    return views.filter(v => v.negotiationStatus !== 'closed');
+  }
+  async function visibleConversations(list: Row[]): Promise<Row[]> {
+    if (!list.length) return list;
+    const proposals = (await db.list('proposals', { conversation_id: listOf(list.map(c => c.id)), status: 'eq.rejected' })).filter(p => p.negotiation_id);
+    if (!proposals.length) return list;
+    const closed = await db.list('negotiations', { id: listOf([...new Set(proposals.map(p => p.negotiation_id))]), status: 'eq.closed' });
+    const closedIds = new Set(closed.map(n => n.id));
+    const hidden = new Set(proposals.filter(p => closedIds.has(p.negotiation_id)).map(p => p.conversation_id));
+    return list.filter(c => !hidden.has(c.id));
   }
   async function accessibleNegotiation(user: Row, id: string): Promise<Row> {
     const n = await one('negotiations', { id: eq(uuid(id)) });
@@ -390,7 +400,7 @@ export function createApp(config: Config, dep: Dependencies) {
       if (chore && method === 'POST') { const id = uuid(chore[1]); if (chore[2] === 'submit') { assert(user.role === 'child', 403, 'FORBIDDEN'); return result(await db.rpc('wb_submit_chore', { p_actor_id: user.id, p_assignment_id: id, p_answer_text: text(body.note, 1000, true) })); } requireParent(); assert(['approved', 'rejected'].includes(body.decision)); return result(await db.rpc('wb_review_chore', { p_actor_id: user.id, p_assignment_id: id, p_decision: body.decision, p_comment: text(body.reason, 1000, body.decision === 'approved') })); }
       const purchase = /^\/api\/goals\/([\w-]+)\/purchase$/.exec(path);
       if (purchase && method === 'POST') { requireParent(); return result(await db.rpc('wb_purchase_goal', { p_actor_id: user.id, p_goal_id: uuid(purchase[1]) })); }
-      if (path === '/api/conversations' && method === 'GET') { const list = await db.list('conversations', { user_id: eq(user.id), context_proposal_id: 'is.null', ...(user.role === 'parent' && url.searchParams.has('childId') ? { child_id: eq(uuid(url.searchParams.get('childId'))) } : {}), order: 'created_at.desc', limit: '100' }); return result({ conversations: list.map(c => ({ conversationId: c.id, childId: c.child_id, createdAt: c.created_at, updatedAt: c.latest_ai_output ? c.updated_at || c.created_at : c.created_at })) }); }
+      if (path === '/api/conversations' && method === 'GET') { const list = await db.list('conversations', { user_id: eq(user.id), context_proposal_id: 'is.null', ...(user.role === 'parent' && url.searchParams.has('childId') ? { child_id: eq(uuid(url.searchParams.get('childId'))) } : {}), order: 'created_at.desc', limit: '100' }); return result({ conversations: (await visibleConversations(list)).map(c => ({ conversationId: c.id, childId: c.child_id, createdAt: c.created_at, updatedAt: c.latest_ai_output ? c.updated_at || c.created_at : c.created_at })) }); }
       if (path === '/api/conversations' && method === 'POST') {
         assert(user.role === 'child', 403, 'FORBIDDEN', '保護者は子どもから届いた提案を確認し、条件を相談するときに親子の交渉へ参加してください。');
         assert(!body.proposalId, 409, 'INVALID_STATE', '提案の修正相談は、開始済みの共有交渉で行ってください。');
@@ -428,7 +438,7 @@ export function createApp(config: Config, dep: Dependencies) {
       if (path === '/api/negotiations' && method === 'GET') {
         const cs = await children(user);
         const rows = cs.length ? await db.list('negotiations', { child_id: listOf(cs.map(c => c.childId)), ...(user.role === 'parent' ? { parent_id: eq(user.id) } : {}), order: 'created_at.desc', limit: '100' }) : [];
-        return result({ negotiations: rows.filter(n => n.status === 'revision_requested' || n.latest_ai_output).map(n => ({ negotiationId: n.id, childId: n.child_id, status: n.status, createdAt: n.created_at })) });
+        return result({ negotiations: rows.filter(n => n.status !== 'closed' && (n.status === 'revision_requested' || n.latest_ai_output)).map(n => ({ negotiationId: n.id, childId: n.child_id, status: n.status, createdAt: n.created_at })) });
       }
       const negotiationRoute = /^\/api\/negotiations\/([\w-]+)(\/(messages|selected-product|proposal-drafts|decision))?$/.exec(path);
       if (negotiationRoute) {
