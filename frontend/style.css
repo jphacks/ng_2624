@@ -1357,3 +1357,18 @@ body:has(#content.chat-layout-v3) {
     margin: 0;
   }
 }
+
+/* Chat screen: composer directly above bottom navigation */
+.app:has(#content.chat-layout-v3) #navigation:not([hidden]) {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  transform: none;
+  width: 100%;
+  order: 2;
+  flex-shrink: 0;
+}
+.app:has(#content.chat-layout-v3) #content.chat-layout-v3 { order: 1; }
+.chat-child-toggle { display: flex; gap: 6px; overflow-x: auto; flex-shrink: 0; padding: 3px 0 8px; }
+.chat-child-toggle button { flex: 0 0 auto; border: 1px solid #b8d6e4; border-radius: 999px; background: #fff; padding: 8px 14px; cursor: pointer; }
+.chat-child-toggle button[aria-pressed="true"] { background: #007fc5; color: #fff; border-color: #007fc5; }
