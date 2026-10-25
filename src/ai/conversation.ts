@@ -85,7 +85,7 @@ export async function createReply(
             const consultation = found.products.length === 3
                 ? input.role === 'child' ? '3つ見つかったよ！ 気になるものをえらんでね。' : '3件の候補が見つかりました。気になるものを選んでください。'
                 : found.products.length ? input.role === 'child' ? `${found.products.length}こ見つかったよ！ 気になるものをえらんでね。` : `${found.products.length}件の候補が見つかりました。`
-                : 'Amazonから商品を取得できませんでした。もう一度検索してください。';
+                : input.role === 'child' ? 'いま Amazonの おみせを うまく よみこめなかったよ。すこし まってから、もういちど さがしてね。' : 'Amazonの検索結果を読み込めませんでした。少し待ってから再度お試しください。';
             if (!found.products.length) return { ...base, action: 'HEARING', search: found.search, reply: consultation };
             return { ...base, action: 'PRODUCT', ...found, reply: input.role === 'child' ? consultation : `${consultation} 表示価格は検索時の参考価格です。` };
         }

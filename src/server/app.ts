@@ -180,6 +180,19 @@ export function createApp(config: Config, dep: Dependencies) {
       throw aiFailure(e, 'AIの返答を取得できませんでした。保存済みの交渉を確認してから再操作してください。');
     }
   }
+  async function saveReason(user: Row, conversationId: string, reason: string) {
+    assert(user.role === 'child',403,'FORBIDDEN','子どもの操作が必要です。');
+    rate(`reason:${user.id}`,30,60000);
+    const lockId=randomUUID(),c=await db.rpc('wb_begin_ai',{p_actor_id:user.id,p_conversation_id:uuid(conversationId),p_lock_id:lockId});
+    try {
+      await family(user,c.child_id||user.id);
+      const products=await hydrateProducts(c.products,true),selected=products.find(p=>p.id===c.selected_product_id);
+      assert(selected&&selected.priceJpy!==null&&selected.priceJpy>0&&selected.imageUrl,409,'PRODUCT_UNAVAILABLE','この しょうひんの ねだんを たしかめられなかったよ。もういちど さがしてね。');
+      const output:AIOutput={requestId:randomUUID(),action:'PROPOSAL',reply:'かいてくれた りゆうを かくにんしよう。',search:null,proposalDraft:{productId:selected.id,target:'parent',persuasionText:reason,purchaseConditions:[],basedOn:null}};
+      const updated=await db.rpc('wb_finish_ai',{p_actor_id:user.id,p_conversation_id:c.id,p_lock_id:lockId,p_message:reason,p_output:output});
+      return chatView(user,updated);
+    }catch(error){await db.rpc('wb_cancel_ai',{p_actor_id:user.id,p_conversation_id:c.id,p_lock_id:lockId}).catch(()=>{});throw error;}
+  }
   async function runAI(user: Row, conversationId: string, message: string | null, searchQuery?: string, onSearchStart?: () => void) {
     rate(`ai:${user.id}`, 20, 600000);
     assert(config.geminiKey, 503, 'SETUP_REQUIRED', 'AIの接続設定がまだ完了していません。');
@@ -387,7 +400,7 @@ export function createApp(config: Config, dep: Dependencies) {
         const c = (await db.insert('conversations', { user_id: user.id, child_id: id }))[0];
         return result(await chatView(user, c), 201);
       }
-      const conversation = /^\/api\/conversations\/([\w-]+)(\/(messages|selected-product|proposal-drafts|search|start|confirm-reason))?$/.exec(path);
+      const conversation = /^\/api\/conversations\/([\w-]+)(\/(messages|selected-product|proposal-drafts|search|start|confirm-reason|reason))?$/.exec(path);
       if (conversation) {
         const c = await ownedChat(user, conversation[1]);
         if (!conversation[3] && method === 'GET') return result(await chatView(user, c));
@@ -408,6 +421,7 @@ export function createApp(config: Config, dep: Dependencies) {
         }
         if (conversation[3] === 'messages' && method === 'POST') return await aiResponse(progress => runAI(user, c.id, text(body.message), undefined, progress));
         if (conversation[3] === 'selected-product' && method === 'PATCH') { const selected = (await hydrateProducts(c.products,true)).find(p => p.id === body.selectedProductId); assert(selected && selected.priceJpy !== null && selected.priceJpy > 0 && selected.imageUrl,409,'PRODUCT_UNAVAILABLE','この商品は画像と価格を確認できません。もう一度Amazonで商品を探してください。'); return result(await chatView(user, await db.rpc('wb_select_product', { p_actor_id: user.id, p_conversation_id: c.id, p_product_id: uuid(body.selectedProductId) }))); }
+        if (conversation[3] === 'reason' && method === 'POST') return result(await saveReason(user,c.id,text(body.reason)));
         if (conversation[3] === 'confirm-reason' && method === 'POST') return result(await chatView(user,await db.rpc('wb_confirm_reason',{p_actor_id:user.id,p_conversation_id:c.id,p_reason:text(body.reasonSummary)})));
         if (conversation[3] === 'proposal-drafts' && method === 'POST') return result(await runAI(user, c.id, null));
       }

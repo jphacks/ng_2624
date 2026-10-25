@@ -159,9 +159,10 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   const fixed=createApp(config,{db,ai:async raw=>{const input=parseAIInput(raw);generated++;assert(input.products[0].sourceUrls.includes(canonical));return {requestId:input.requestId,action:'PROPOSAL',reply:'この理由で合ってる？',search:null,proposalDraft:{productId,target:'parent',persuasionText:'楽しそうだから',purchaseConditions:[],basedOn:null}};},enrich:async p=>p,image:async()=>null,qr:async()=>''});
   const request=async(path:string,body:unknown)=>{const r=await fixed(new Request(config.origin+'/api'+path,{method:'POST',headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','content-type':'application/json'},body:JSON.stringify(body)}));const result=await r.json();assert.equal(r.status,200,JSON.stringify(result));return result.data;};
   const reason=await request('/conversations/'+cid+'/messages',{message:'楽しそうだから'});assert.equal(reason.reasonSummary,'楽しそうだから');assert.equal(generated,1);
-  const confirmed=await request('/conversations/'+cid+'/confirm-reason',{reasonSummary:reason.reasonSummary});const draft=confirmed.currentProposal;
+  const written=await request('/conversations/'+cid+'/reason',{reason:'ただ 楽しそう！'});assert.equal(written.reasonSummary,'ただ 楽しそう！');assert.equal(generated,1,'自由記述ではAIを呼ばない');
+  const confirmed=await request('/conversations/'+cid+'/confirm-reason',{reasonSummary:written.reasonSummary});const draft=confirmed.currentProposal;
   await request('/proposals/'+draft.id+'/send',{version:draft.version});
-  const received=await call('/proposals/'+draft.id,'GET',undefined,'parent');assert.equal(received.data.canRespond,true);assert.equal(received.data.proposal.persuasionText,'楽しそうだから');
+  const received=await call('/proposals/'+draft.id,'GET',undefined,'parent');assert.equal(received.data.canRespond,true);assert.equal(received.data.proposal.persuasionText,'ただ 楽しそう！');
  });
  await t.test('自動検索の進捗を結果の確定前にストリームで返す',async()=>{
   const c=await call('/conversations','POST',{}),cid=c.data.conversationId;await call('/conversations/'+cid+'/start','POST',{});
