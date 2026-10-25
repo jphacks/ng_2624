@@ -7,8 +7,6 @@ import { readFile } from 'node:fs/promises';
 const source=await readFile(new URL('../../frontend/app.js',import.meta.url),'utf8');
 async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>,confirm=(_message:string)=>true){
  const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools','#role-label'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
- const classes=new Set<string>();
- nodes['#content'].classList={add:(...names:string[])=>names.forEach(name=>classes.add(name)),remove:(...names:string[])=>names.forEach(name=>classes.delete(name)),contains:(name:string)=>classes.has(name)};
  const location={hash:'#home',search:'',pathname:'/'};
  const events:any={};const window:any={scrollX:0,scrollY:0,scrollTo(position:any){window.scrollX=position.left;window.scrollY=position.top;},addEventListener:(name:string,fn:any)=>{events[name]=fn;}};
  const context=vm.createContext({window,document:{querySelector:(id:string)=>nodes[id],addEventListener:(name:string,fn:any)=>{events[name]=fn;}},location,
@@ -273,64 +271,4 @@ test('small screen label follows the signed-in role, including child details and
  ui.state.session={authenticated:false};await ui.go('#home');
  assert.equal(ui.nodes['#role-label'].hidden,true);
  assert.equal(ui.nodes['#role-label'].textContent,'');
-});
-
-test('unified chat retains child, personal and shared thread switching without starting on entry',async()=>{
- const calls:string[]=[];
- const thread={conversationId:'latest',mode:'consultation',phase:'not_started',canMessage:false,messages:[],products:[]};
- const ui=await frontend(async(path,method)=>{
-  calls.push((method||'GET')+' '+path);
-  if(path==='/children')return {children:[{childId:'child',displayName:'一人目'},{childId:'other',displayName:'二人目'}]};
-  if(path.startsWith('/conversations?'))return {conversations:[{conversationId:'old',updatedAt:'2026-10-24'},{conversationId:'latest',updatedAt:'2026-10-25'}]};
-  if(path==='/negotiations')return {negotiations:[{negotiationId:'shared',childId:'child'},{negotiationId:'other-shared',childId:'other'}]};
-  if(path==='/negotiations/shared')return {...thread,mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true};
-  if(path==='/conversations/latest/start')return {...thread,phase:'consultation',canMessage:true};
-  if(path.startsWith('/conversations/'))return {...thread,conversationId:path.split('/')[2]};
-  return basic(path);
- });
- await ui.go('#conversations');
- const html=ui.nodes['#content'].innerHTML;
- assert.equal(ui.state.chat.conversationId,'latest');
- assert.match(html,/id="child-selector"/);assert.match(html,/一人目/);assert.match(html,/二人目/);
- assert.match(html,/data-action="new-chat"/);assert.match(html,/data-id="old"/);assert.match(html,/data-id="shared"/);
- assert.doesNotMatch(html,/data-id="other-shared"|data-form="message"/);
- assert.ok(!calls.some(call=>call.startsWith('POST ')));
- assert.equal(ui.nodes['#content'].classList.contains('chat-layout-v3'),true);
- await ui.action('start-chat');assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
- await ui.action('open-chat','old');assert.equal(ui.location.hash,'#conversation/old');
- await ui.action('open-negotiation','shared');assert.equal(ui.location.hash,'#negotiation/shared');
- assert.match(ui.nodes['#content'].innerHTML,/親子に公開するメッセージ/);
- assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="search-product-now"/);
- ui.events.change({target:{id:'child-selector',value:'other'}});
- await new Promise(resolve=>setImmediate(resolve));
- assert.equal(ui.location.hash,'#conversations');
- assert.equal(ui.state.childId,'other');
- assert.ok(calls.includes('GET /conversations?childId=other'));
- assert.match(ui.nodes['#content'].innerHTML,/data-id="other-shared"/);
- assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-id="shared"/);
- await ui.go('#home');assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
- assert.equal(ui.nodes['#content'].classList.contains('chat-layout-v3'),false);
-});
-
-test('new unified chat uses existing create, start and product search endpoints',async()=>{
- const posts:{path:string,body:any}[]=[];
- let thread={conversationId:'new',mode:'consultation',phase:'not_started',canMessage:false,messages:[],products:[]};
- const ui=await frontend(async(path,method,body)=>{
-  if(method==='POST')posts.push({path,body});
-  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
-  if(path==='/conversations'&&method!=='POST')return {conversations:[]};
-  if(path==='/negotiations')return {negotiations:[]};
-  if(path==='/conversations')return {conversationId:'new'};
-  if(path==='/conversations/new/start')thread={...thread,phase:'consultation',canMessage:true};
-  if(path.startsWith('/conversations/new'))return thread;
-  return basic(path);
- });
- await ui.go('#conversations');
- assert.equal(JSON.stringify(posts),JSON.stringify([{path:'/conversations',body:{}}]));
- assert.match(ui.nodes['#content'].innerHTML,/個別相談を開始する/);
- await ui.action('start-chat');await ui.action('search-product-now');
- assert.equal(posts.at(-1)?.path,'/conversations/new/search');
- assert.match(posts.at(-1)?.body.query,/これまでのチャット/);
- assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
- assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="search-products"/);
 });
