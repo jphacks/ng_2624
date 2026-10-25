@@ -1,10 +1,18 @@
 (() => {
 'use strict';
 const $=s=>document.querySelector(s);
+let activeOperations=0;
+function activity(change){
+ activeOperations+=change;
+ const indicator=$('#activity-indicator');if(!indicator)return;
+ if(activeOperations>0){if(indicator.hidden){indicator.hidden=false;indicator.showPopover?.();}}
+ else if(!indicator.hidden){indicator.hidePopover?.();indicator.hidden=true;}
+}
 async function api(...args){
- const epoch=state.epoch;
+ const epoch=state.epoch;activity(1);
  try { const result=await API.request(...args);if(epoch!==state.epoch)throw Object.assign(new Error(),{stale:true,completed:args[1]&&args[1]!=='GET'});return result; }
  catch(e){if(epoch!==state.epoch)e.stale=true;throw e;}
+ finally{activity(-1);}
 }
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=n=>Number(n||0).toLocaleString('ja-JP'), points=n=>num(n)+' ポイント';
@@ -65,7 +73,7 @@ async function respondPairingDialog(id,decision,confirmationCode){
 }
 function notice(text='',error=false){$('#notice').textContent=text;$('#notice').className=error?'global-notice form-error':'global-notice';}
 function render(html){state.loading=false;state.dirty=false;$('#content').classList?.remove('chat-layout-fixed-v2','chat-layout-v3');$('#content').innerHTML=html;$('#content').setAttribute('aria-busy','false');}
-function loading(){render('<p>読み込んでいます…</p>');state.loading=true;$('#content').setAttribute('aria-busy','true');}
+function loading(){render('');state.loading=true;$('#content').setAttribute('aria-busy','true');}
 function nav(){ if(!parent())closePairingDialog();const roleLabel=$('#role-label');roleLabel.hidden=!state.session?.authenticated;roleLabel.textContent=state.session?.authenticated?(parent()?'保護者の画面':'子どもの画面'):'';$('#demo-tools').hidden=!state.session?.demo;$('#navigation').hidden=!state.session?.authenticated;$('#navigation').innerHTML=navLink('#home','home','ホーム')+(!parent()||state.canNegotiate?navLink('#conversations','chat',parent()?'親子で相談':'ぽぽにそうだん'):'')+navLink('#settings','gear',parent()?'設定':'じぶんの設定'); }
 // Line icons for the bottom bar: house, hand, speech bubble, gear.
 const navIcons={
@@ -248,13 +256,13 @@ async function navigate(preserveScroll=false){state.routeHash=location.hash;cons
 async function error(e){if(e.stale){if(e.completed)notice('前の画面の操作が完了しました。最新の状態に更新して確認してください。');return;}notice(e.message||'処理に失敗しました。',true);if(state.loading)render('<h1>画面を読み込めませんでした</h1><p>少し待ってから、もう一度お試しください。</p>'+btn('もう一度読み込む','reload'));if(e.code==='PAIRING_EXPIRED'){state.pairingId=null;sessionStorage.removeItem('pairingRequestId');welcome();}else if(e.status===401){state.session={authenticated:false,demo:state.session?.demo};API.clear();welcome();}if(e.code==='CSRF_INVALID')await api('/auth/session');if(['VERSION_CONFLICT','INVALID_STATE','CONFLICT'].includes(e.code))$('#notice').insertAdjacentHTML('beforeend',btn('最新の状態を確認','reload'));}
 async function run(task,source){
  if(state.busy){notice('前の操作を処理中です。完了後にもう一度操作してください。');return;}
- state.busy=true;
+ state.busy=true;activity(1);
  const controls=source?[...(source.matches('form')?source.querySelectorAll('button,input,textarea,select'):[source])]:[];
  const disabled=controls.map(c=>c.disabled);controls.forEach(c=>c.disabled=true);
  notice();
  try{await task();}
  catch(e){if(source?.closest?.('#pairing-dialog')){$('#pairing-error').textContent=e.message||'処理に失敗しました。';}else{await error(e);$('#notice').scrollIntoView?.({block:'center',behavior:'smooth'});}}
- finally{state.busy=false;controls.forEach((c,i)=>c.disabled=disabled[i]);}
+ finally{activity(-1);state.busy=false;controls.forEach((c,i)=>c.disabled=disabled[i]);}
 }
 const path=id=>encodeURIComponent(id);
 const due=value=>value?new Date(value+'T23:59:59').toISOString():null;

@@ -6,7 +6,8 @@ import { readFile } from 'node:fs/promises';
 // Execute the shipped script with a small DOM boundary. No application-only test hooks.
 const source=await readFile(new URL('../../frontend/app.js',import.meta.url),'utf8');
 async function frontend(request:(path:string,method?:string,body?:any)=>Promise<any>,confirm=(_message:string)=>true){
- const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools','#role-label','#pairing-dialog','#pairing-error'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
+ const nodes:any=Object.fromEntries(['#content','#notice','#navigation','#demo-tools','#role-label','#pairing-dialog','#pairing-error','#activity-indicator'].map(id=>[id,{innerHTML:'',textContent:'',setAttribute(){},insertAdjacentHTML(){}}]));
+ nodes['#activity-indicator'].hidden=true;
  const dialog=nodes['#pairing-dialog'];dialog.open=false;dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;};dialog.addEventListener=()=>{};
  const classes=new Set<string>();
  nodes['#content'].classList={add:(...names:string[])=>names.forEach(name=>classes.add(name)),remove:(...names:string[])=>names.forEach(name=>classes.delete(name)),contains:(name:string)=>classes.has(name)};
@@ -557,4 +558,29 @@ test('pairing rejection sends no confirmation code and child sessions never poll
   return basic(path);
  });
  await child.checkPairingRequests();assert.equal(polls,0);assert.equal(child.nodes['#pairing-dialog'].open,false);
+});
+
+test('foreground request shows a spinner and clears it on both success and failure',async()=>{
+ let finish!:(value:any)=>void,fail!:(reason:Error)=>void;
+ const ui=await frontend(async path=>path==='/conversations/slow'?new Promise((resolve,reject)=>{finish=resolve;fail=reject;}):basic(path));
+ ui.state.session={...session,user:{...session.user,role:'child'}};
+ const pending=ui.run(()=>ui.chat('slow'));
+ assert.equal(ui.nodes['#activity-indicator'].hidden,false);
+ finish({conversationId:'slow',messages:[],products:[]});await pending;
+ assert.equal(ui.nodes['#activity-indicator'].hidden,true);
+ const failure=ui.run(()=>ui.chat('slow'));
+ assert.equal(ui.nodes['#activity-indicator'].hidden,false);
+ fail(new Error('通信に失敗しました'));await failure;
+ assert.equal(ui.nodes['#activity-indicator'].hidden,true);
+ assert.match(ui.nodes['#notice'].textContent,/通信に失敗/);
+});
+test('spinner stays visible while an older overlapping request is still pending',async()=>{
+ let finish!:(value:any)=>void;
+ const ui=await frontend(async path=>path==='/conversations/slow'?new Promise(resolve=>{finish=resolve;}):basic(path));
+ ui.state.session={...session,user:{...session.user,role:'child'}};
+ const pending=ui.run(()=>ui.chat('slow'));
+ await ui.go('#children');
+ assert.equal(ui.nodes['#activity-indicator'].hidden,false);
+ finish({conversationId:'slow',messages:[],products:[]});await pending;
+ assert.equal(ui.nodes['#activity-indicator'].hidden,true);
 });
