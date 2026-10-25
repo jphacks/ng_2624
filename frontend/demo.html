@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ふぁみぽぽ｜親子同時確認</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#edf6f8;color:#18394a;font-family:system-ui,"Hiragino Sans",sans-serif}
+header{padding:12px 20px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-size:20px;margin:0}.hint{font-size:12px;color:#567}
+main{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px;height:calc(100dvh - 75px);min-height:550px}
+section{min-width:0;display:flex;flex-direction:column;border:1px solid #d5e5eb;border-radius:16px;overflow:hidden;background:white}
+.bar{display:flex;gap:8px;align-items:center;padding:10px;background:#f8fcff;flex-wrap:wrap}
+.bar strong{white-space:nowrap}.bar input{flex:1;min-width:180px;padding:8px;border:1px solid #c6dce5;border-radius:8px;font-size:13px}
+.bar button{padding:8px 12px;background:#007fc5;color:white;border:0;border-radius:8px;cursor:pointer}
+iframe{width:100%;flex:1;border:0;background:white}
+@media(max-width:750px){main{display:flex;flex-direction:column;height:auto}section{height:75dvh;min-height:500px}}
+</style>
+</head>
+<body>
+<header><h1>ふぁみぽぽ｜親子同時確認</h1><span class="hint">左：保護者 ／ 右：子ども　※異なるオリジンのURLを設定するとログイン状態を分けやすくなります</span></header>
+<main>
+<section><div class="bar"><strong>👨‍👩‍👧 保護者</strong><input id="parent-url" type="url" placeholder="親画面のURL（https://...）" aria-label="親画面のURL"><button id="parent-open">表示</button></div><iframe id="parent-frame" title="保護者画面" loading="eager"></iframe></section>
+<section><div class="bar"><strong>🧒 子ども</strong><input id="child-url" type="url" placeholder="子ども画面のURL（https://...）" aria-label="子ども画面のURL"><button id="child-open">表示</button></div><iframe id="child-frame" title="子ども画面" loading="eager"></iframe></section>
+</main>
+<script>
+const params=new URLSearchParams(location.search);
+function setup(kind){
+ const input=document.getElementById(kind+'-url'),frame=document.getElementById(kind+'-frame');
+ const initial=params.get(kind)||'';
+ input.value=initial;
+ function load(){try{const url=new URL(input.value);if(!['https:','http:'].includes(url.protocol))throw Error();frame.src=url.href;}catch{alert('http:// または https:// で始まるURLを入力してください');}}
+ document.getElementById(kind+'-open').addEventListener('click',load);
+ input.addEventListener('keydown',e=>{if(e.key==='Enter')load()});
+ if(initial)load();
+}
+setup('parent');setup('child');
+</script>
+</body>
+</html>
