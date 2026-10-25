@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ふぁみぽぽ｜親子同時操作</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;font-family:system-ui,"Hiragino Sans",sans-serif;background:#eef8fc;color:#18394a}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;padding:12px;height:100dvh;min-width:680px}
+section{min-width:0;display:flex;flex-direction:column;overflow:hidden;background:white;border:1px solid #d5e5eb;border-radius:18px}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:#eaf9e7}
+.child header{background:#e9f7ff}
+strong{font-size:17px}button{background:#007fc5;color:white;border:0;border-radius:9px;padding:8px 12px;cursor:pointer}
+iframe{display:block;width:100%;flex:1;border:0;background:white}
+</style></head><body>
+<main>
+<section><header><strong>👨‍👩‍👧 保護者</strong><button type="button" onclick="reload('parent')">左だけ更新</button></header><iframe id="parent" title="保護者アプリ" src="https://ng-2624.onrender.com/" loading="eager"></iframe></section>
+<section class="child"><header><strong>🧒 子ども</strong><button type="button" onclick="reload('child')">右だけ更新</button></header><iframe id="child" title="子どもアプリ" src="https://ng-2624.onrender.com/" loading="eager"></iframe></section>
+</main><script>
+function reload(id){const frame=document.getElementById(id);frame.src=frame.src}
+</script></body></html>
