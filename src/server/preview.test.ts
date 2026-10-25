@@ -59,6 +59,25 @@ test('missing metadata removes unverified AI image and preserves other fields', 
   const preview = createProductPreview({ resolve: async () => [publicAddress], read: async () => html('<title>Product</title>') });
   assert.deepEqual(await preview.enrichProduct(product), { ...product, imageUrl: null });
 });
+
+test('Amazon search image goes straight to the verified CDN without fetching the product HTML', async () => {
+  const calls: string[] = [];
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async url => { calls.push(url.href); return pngResponse(); } });
+  const candidate = { ...product, productUrl: 'https://www.amazon.co.jp/dp/B000000001', imageUrl: 'https://m.media-amazon.com/images/I/actual-product.png' };
+  assert.equal((await preview.enrichProduct(candidate)).imageUrl, '/api/products/product-1/image');
+  assert.deepEqual(calls, [candidate.imageUrl]);
+  assert.deepEqual(await preview.fetchProductImage(candidate.productUrl), { body: png, contentType: 'image/png' });
+  assert.equal(calls.length, 1);
+});
+
+test('Amazon product pages over 512KB can use their main image without OG metadata', async () => {
+  const page = ' '.repeat(512 * 1024) + '<img id="landingImage" src="https://m.media-amazon.com/images/I/actual-product.png">';
+  const preview = createProductPreview({ resolve: async () => [publicAddress], read: async (url, _address, limit) => {
+    if (url.hostname === 'www.amazon.co.jp') { assert.equal(limit, 4 * 1024 * 1024); return html(page); }
+    return pngResponse();
+  } });
+  assert.deepEqual(await preview.fetchProductImage('https://www.amazon.co.jp/dp/B000000001'), { body: png, contentType: 'image/png' });
+});
 test('Amazon source resolution accepts product paths and rejects other destinations or unsafe DNS', async () => {
   const direct='https://www.amazon.co.jp/dp/B000000000';let calls=0;
   const preview=createProductPreview({resolve:async()=>[publicAddress],read:async()=>{calls++;return {status:302,headers:{location:direct},body:Buffer.alloc(0)};}});

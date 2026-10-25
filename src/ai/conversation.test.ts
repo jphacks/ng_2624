@@ -840,6 +840,14 @@ test('Amazon検索は固定HTTPSホスト・価格帯・リダイレクト禁止
     assert.equal(sentSignal?.aborted, true);
 });
 
+test('Amazon検索カードの画像はAmazon CDNのものだけを候補へ渡す', () => {
+    const html = [
+        amazonCard('B000000001', '車', amazonPrice(1000) + '<img class="s-image" src="https://m.media-amazon.com/images/I/car.jpg">'),
+        amazonCard('B000000002', '別の商品', amazonPrice(1000) + '<img class="s-image" src="https://127.0.0.1/private">'),
+    ].join('');
+    assert.deepEqual(parseAmazonResults(html, 0, 2000).candidates?.map(p => p.imageUrl), ['https://m.media-amazon.com/images/I/car.jpg', null]);
+});
+
 test('Amazonの取得失敗・認証チェック・巨大な応答を商品候補として扱わない', async () => {
     const request = { systemInstruction: '', input: JSON.stringify({ query: '車', targetBudget: { minJpy: 800, maxJpy: 1200 } }) };
     for (const response of [
@@ -871,6 +879,39 @@ test('検索ボタンは聞き取りへ戻らず、価格とキーワードを�
     assert.deepEqual(output.products.map(p => [p.size, p.priceJpy]), [['small', 1500], ['medium', 5000], ['large', 20000]]);
     assert.equal(new Set(output.products.map(p => p.productUrl)).size, 3);
     assert.ok(output.products.every(p => p.productUrl.startsWith('https://www.amazon.co.jp/dp/') && p.recommendationReason.includes('目安金額±20％を外れ')));
+});
+
+test('Amazon直接取得が拒否されてもFlash検索1回へ切り替え、価格を捏造せず3商品を返す', async () => {
+    const original = globalThis.fetch;
+    let direct = 0, searches = 0, extractions = 0;
+    globalThis.fetch = async () => { direct++; return new Response('unavailable', { status: 503 }); };
+    try {
+        const found = await searchProducts('ブロック', input(), async request => {
+            if (request.search) {
+                searches++;
+                assert.equal(request.timeoutMs, 15_000);
+                assert.match(request.systemInstruction, /条件を緩め/);
+                return { text: '実商品の検索結果。価格は未確認。', evidence: {}, search: { queries: ['ブロック Amazon'], searchSuggestionsHtml: null,
+                    sources: [0, 1, 2].map(i => ({ id: `s${i}`, title: `ブロック${i}`, url: `https://www.amazon.co.jp/dp/B00000000${i}` })) } };
+            }
+            extractions++;
+            assert.match(request.systemInstruction, /目安金額の範囲外や価格未確認でも/);
+            return { text: JSON.stringify({ products: JSON.parse(request.input).sources.map((source: { id: string; title: string }) => ({
+                name: source.title, description: '検索で確認した商品。', recommendationReason: '代案です。', productSourceId: source.id, sourceIds: [source.id], priceJpy: null, priceEvidence: null,
+            })) }), evidence: {}, search: null };
+        }, () => crypto.randomUUID(), searchAmazon);
+        assert.equal(direct, 3); assert.equal(searches, 1); assert.equal(extractions, 1);
+        assert.deepEqual(found.products.map(p => p.size), ['small', 'medium', 'large']);
+        assert.ok(found.products.every(p => p.priceJpy === null && p.priceCheckedAt === null && p.recommendationReason.includes('価格は未確認')));
+        assert.equal(new Set(found.products.map(p => p.productUrl)).size, 3);
+    } finally { globalThis.fetch = original; }
+});
+
+test('補助検索に失敗してもAmazonで取得済みの商品は保持する', async () => {
+    const found = await searchProducts('ブロック', input(), async () => { throw new Error('search unavailable'); }, () => crypto.randomUUID(),
+        async () => parseAmazonResults(amazonCard('B000000001', 'ブロック', amazonPrice(1000)), 0, 10000));
+    assert.equal(found.products.length, 1);
+    assert.equal(found.products[0].productUrl, 'https://www.amazon.co.jp/dp/B000000001');
 });
 
 test('並列検索で同じ出典IDが使われても、URLごとの価格の根拠を混ぜず大中小を返す', async () => {

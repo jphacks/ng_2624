@@ -24,11 +24,11 @@ export function selectRewards(
         const size = GOAL_SIZES[index];
         const amount = guidelines[`${size}Jpy`];
         for (const candidate of candidates) {
-            if (candidate.priceJpy === null || amount === null || (!relaxPrice && !withinGuideline(candidate.priceJpy, amount))
+            if (amount === null || (!relaxPrice && (candidate.priceJpy === null || !withinGuideline(candidate.priceJpy, amount)))
                 || chosen.some(item => item.id === candidate.id || item.productUrl === candidate.productUrl
                     || item.name.trim().toLowerCase() === candidate.name.trim().toLowerCase())) continue;
             chosen.push({ ...candidate, size });
-            visit(index + 1, chosen, distance + Math.abs(candidate.priceJpy - amount!) / Math.max(amount!, 1));
+            visit(index + 1, chosen, distance + (candidate.priceJpy === null ? 1e9 : Math.abs(candidate.priceJpy - amount) / Math.max(amount, 1)));
             chosen.pop();
         }
         visit(index + 1, chosen, distance);

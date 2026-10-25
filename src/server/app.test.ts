@@ -36,6 +36,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  },enrich:async p=>({...p,imageUrl:null}),image:async()=>null,qr:async()=> 'data:image/png;base64,test'});
  async function call(path:string,method='GET',body?:unknown,role='child',csrf='csrf',origin=config.origin){const tok=role==='parent'?tokenParent:role==='stranger'?tokenStranger:tokenChild;const r=await app(new Request(config.origin+'/api'+path,{method,headers:{cookie:'wb_local_session='+tok,origin,'x-csrf-token':csrf,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}));return {status:r.status,...await r.json()};}
  await t.test('CSRF, role and family gates run before protected mutations',async()=>{
+  assert.equal((await call('/children/'+child+'/invitations','POST',{})).status,403);
   assert.equal((await call('/auth/logout','POST',{})).status,403);
   assert.equal((await call('/devices/'+hash(tokenParent),'DELETE')).status,403);
   assert.equal((await call('/auth/session')).data.authenticated,true);
@@ -134,6 +135,19 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
    assert.ok(!JSON.stringify(payload).includes('sensitive-upstream-details'));
    if(status===429)assert.equal(response.headers.get('Retry-After'),'60');
    const stored=(await db.list('conversations',{id:'eq.'+cid}))[0];assert.equal(stored.ai_lock_id,null);
+  }
+ });
+ await t.test('invitation creation needs parent, family and CSRF checks but no recent reauthentication',async()=>{
+  const path='/children/'+child+'/invitations';
+  for(const reauthenticatedAt of [new Date(Date.now()-11*60000).toISOString(),null]){
+   await db.update('app_sessions',{token_hash:'eq.'+hash(tokenParent)},{reauthenticated_at:reauthenticatedAt});
+   assert.equal((await call(path,'POST',{},'stranger')).status,403);
+   assert.equal((await call(path,'POST',{},'parent','wrong')).status,403);
+   const invitation=await call(path,'POST',{},'parent');
+   assert.equal(invitation.status,201);assert.equal(invitation.data.childId,child);
+   assert.match(invitation.data.invitationToken,/^[A-Z2-9]{12}$/);
+   assert.equal(invitation.data.pairingUrl,config.origin+'/pairing#invitationToken='+invitation.data.invitationToken);
+   assert.match(invitation.data.qrDataUrl,/^data:image\/png;base64,/);
   }
  });
  await t.test('device revocation needs parent, family and CSRF checks but no recent reauthentication',async()=>{

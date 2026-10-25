@@ -11,6 +11,15 @@ type Dependencies = {
   read: (url: URL, address: Address, maxBytes: number, signal: AbortSignal) => Promise<Response>;
 };
 const HTML_LIMIT = 512 * 1024, IMAGE_LIMIT = 2 * 1024 * 1024;
+const AMAZON_HTML_LIMIT = 4 * 1024 * 1024;
+const amazonHost = (url: URL) => ['amazon.co.jp', 'www.amazon.co.jp'].includes(url.hostname);
+function amazonImage(value: string | null | undefined): URL | null {
+  if (!value) return null;
+  try {
+    const url = httpsUrl(value);
+    return ['m.media-amazon.com', 'images-na.ssl-images-amazon.com', 'images-fe.ssl-images-amazon.com'].includes(url.hostname) && url.pathname.startsWith('/images/I/') ? url : null;
+  } catch { return null; }
+}
 
 /** Conservative public-unicast allowlist, excluding mapped and transition IPv6. */
 export function isPublicAddress(address: string): boolean {
@@ -74,6 +83,13 @@ function imageMetadata(html: string, base: URL): URL | null {
       try { return httpsUrl(attributes.content, base); } catch { /* Try other metadata. */ }
     }
   }
+  if (amazonHost(base)) for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
+    if (!/\sid=["'](?:landingImage|imgBlkFront|main-image)["']/i.test(tag)) continue;
+    const attributes: Record<string, string> = {};
+    for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attributes[match[1].toLowerCase()] = decodeHtml(match[2] ?? match[3]);
+    const image = amazonImage(attributes['data-old-hires']) ?? amazonImage(attributes.src);
+    if (image) return image;
+  }
   return null;
 }
 function validImage(body: Buffer, type: string): boolean {
@@ -104,26 +120,30 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     }
     throw new Error('Too many redirects');
   }
-  async function retrieve(productUrl: string, signal: AbortSignal): Promise<PreviewImage | null> {
+  async function retrieve(productUrl: string, signal: AbortSignal, imageHint?: string | null): Promise<PreviewImage | null> {
     try {
-      const page = await read(httpsUrl(productUrl), HTML_LIMIT, signal);
-      if (!/^text\/html(?:;|$)/i.test(String(page.response.headers['content-type']))) return null;
-      const imageUrl = imageMetadata(page.response.body.toString('utf8'), page.url);
+      const product = httpsUrl(productUrl);
+      let imageUrl = amazonHost(product) ? amazonImage(imageHint) : null;
+      if (!imageUrl) {
+        const page = await read(product, amazonHost(product) ? AMAZON_HTML_LIMIT : HTML_LIMIT, signal);
+        if (!/^text\/html(?:;|$)/i.test(String(page.response.headers['content-type']))) return null;
+        imageUrl = imageMetadata(page.response.body.toString('utf8'), page.url);
+      }
       if (!imageUrl) return null;
       const image = await read(imageUrl, IMAGE_LIMIT, signal);
       const contentType = String(image.response.headers['content-type']).split(';')[0].trim().toLowerCase();
       return validImage(image.response.body, contentType) ? { body: image.response.body, contentType } : null;
     } catch { return null; }
   }
-  async function fetchProductImage(productUrl: string): Promise<PreviewImage | null> {
+  async function fetchProductImage(productUrl: string, imageHint?: string | null): Promise<PreviewImage | null> {
     const cached = cache.get(productUrl);
-    if (cached && cached.expires > Date.now()) return cached.image;
+    if (cached && cached.expires > Date.now() && (cached.image || !imageHint)) return cached.image;
     const existing = pending.get(productUrl); if (existing) return existing;
     if (pending.size >= 4) return null;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<null>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, 8000); });
-    const work = Promise.race([retrieve(productUrl, controller.signal), deadline]).then(image => {
+    const work = Promise.race([retrieve(productUrl, controller.signal, imageHint), deadline]).then(image => {
       cache.delete(productUrl);
       if (cache.size >= 32) cache.delete(cache.keys().next().value!);
       cache.set(productUrl, { expires: Date.now() + 5 * 60_000, image }); return image;
@@ -154,7 +174,7 @@ export function createProductPreview(deps: Dependencies = dependencies) {
     try { return await Promise.race([work, timeout]); } finally { clearTimeout(timer!); }
   }
   async function enrichProduct(product: ProductCandidate): Promise<ProductCandidate> {
-    const image = await fetchProductImage(product.productUrl);
+    const image = await fetchProductImage(product.productUrl, product.imageUrl);
     return { ...product, imageUrl: image ? `/api/products/${encodeURIComponent(product.id)}/image` : null };
   }
   return { enrichProduct, fetchProductImage, resolveAmazonProductUrl };
