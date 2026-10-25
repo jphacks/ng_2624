@@ -17,7 +17,7 @@ async function frontend(request:(path:string,method?:string,body?:any)=>Promise<
  const context=vm.createContext({window,document,location,
  history:{pushState:(_:unknown,__:string,hash:string)=>{location.hash=hash;},replaceState:(_:unknown,__:string,hash:string)=>{location.hash=hash;}},
  sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},API:{request,clear(){}},URL,URLSearchParams,console,confirm});
- vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat,checkPairingRequests,refreshVisible};})();'),context);
+ vm.runInContext(source.replace(/\}\)\(\);\s*$/, 'window.testing={state,run,go,action,submit,chat,checkPairingRequests,refreshVisible,inferGradeFromBirthDate};})();'),context);
  await new Promise(resolve=>setImmediate(resolve));
  return {...window.testing,nodes,events,location,window,document};
 }
@@ -741,4 +741,32 @@ test('pairing confirmation uses one plain explanation and a clear completion but
  ui.state.session={authenticated:false};ui.state.pairingId='pair-1';await ui.go('#pairing');
  let html=ui.nodes['#content'].innerHTML;assert.match(html,/おうちの人に確認してもらおう/);assert.match(html,/保護者に、この6桁の確認番号/);assert.match(html,/保護者の承認を待っています/);assert.doesNotMatch(html,/①|②|せつぞくを|おへんじ|じどう/);
  approved=true;await ui.refreshVisible();html=ui.nodes['#content'].innerHTML;assert.match(html,/接続を完了する/);assert.doesNotMatch(html,/せつぞくを おわる/);
+});
+
+
+test('birthday grade inference observes April 1/2 cohorts and Japan school-year rollover',async()=>{
+ const ui=await frontend(basic),infer=ui.inferGradeFromBirthDate,now=new Date('2026-10-25T12:00:00Z');
+ assert.equal(infer('2019-04-01',now),'2');assert.equal(infer('2019-04-02',now),'1');
+ assert.equal(infer('2019-04-02',new Date('2026-03-31T14:59:59Z')),'');assert.equal(infer('2019-04-02',new Date('2026-03-31T15:00:00Z')),'1');
+ assert.equal(infer('2008-04-02',now),'12');assert.equal(infer('2008-04-01',now),'');assert.equal(infer('2024-04-02',now),'');
+ assert.equal(infer('2027-01-01',now),null);assert.equal(infer('2019-02-30',now),null);assert.equal(infer('0201-01-01',now),null);assert.equal(infer('',now),null);
+});
+
+test('birthday fills grade once, honors manual choices, and keeps the marker across refresh',async()=>{
+ let balance=0,replacements=0;const today=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}),schoolYear=Number(today.slice(0,4))-(today.slice(5,7)<'04'?1:0),firstGradeBirthday=`${schoolYear-7}-04-02`;
+ const ui=await frontend(async path=>{if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};if(path.startsWith('/dashboard'))return {...dashboard,balanceYen:balance};return basic(path);});
+ let grade:any={name:'gradeLevel',value:'',dataset:{gradeInitialized:'false'}};
+ const form={dataset:{form:'create-child',id:''},querySelector:()=>grade};
+ const birth={name:'birthDate',value:firstGradeBirthday,closest:()=>form};grade.closest=()=>form;
+ ui.events.focusout({target:birth});assert.equal(grade.value,'1');assert.equal(grade.dataset.gradeInitialized,'true');
+ birth.value='2010-04-02';ui.events.focusout({target:birth});assert.equal(grade.value,'1');
+ grade.value='6';ui.events.change({target:grade});birth.value='2015-04-02';ui.events.focusout({target:birth});assert.equal(grade.value,'6');
+ grade.value='';grade.dataset.gradeInitialized='false';ui.events.change({target:grade});ui.events.focusout({target:birth});assert.equal(grade.value,'');
+ grade.value='';grade.dataset.gradeInitialized='false';birth.value='2024-04-02';ui.events.focusout({target:birth});assert.equal(grade.value,'');assert.equal(grade.dataset.gradeInitialized,'true');
+ birth.value='2019-04-02';ui.events.focusout({target:birth});assert.equal(grade.value,'');
+ const content=ui.nodes['#content'];let html=content.innerHTML;
+ content.querySelectorAll=(selector:string)=>selector==='input,textarea,select'?[grade]:[];
+ Object.defineProperty(content,'innerHTML',{get:()=>html,set:(next:string)=>{replacements++;html=next;grade={...grade,dataset:{gradeInitialized:'false'}};}});
+ balance=1;await ui.refreshVisible();assert.equal(replacements,1);assert.equal(grade.dataset.gradeInitialized,'true');
+ grade.dataset.gradeInitialized='true';grade.value='4';ui.events.focusout({target:birth});assert.equal(grade.value,'4');
 });
