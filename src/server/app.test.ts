@@ -56,8 +56,8 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  });
  let conversation:string,proposal:string;
  await t.test('individual chat output is persisted atomically and hidden from the other parent',async()=>{
-  const pc=await call('/conversations','POST',{childId:child},'parent');assert.equal(pc.status,201);
-  await pg.query('insert into public.messages(conversation_id,sender,content) values($1,\'user\',\'親の秘密\')',[pc.data.conversationId]);
+  const pc={data:(await db.insert('conversations',{user_id:parent,child_id:child}))[0]};
+  await pg.query('insert into public.messages(conversation_id,sender,content) values($1,\'user\',\'親の秘密\')',[pc.data.id]);
   const c=await call('/conversations','POST',{});assert.equal(c.status,201);conversation=c.data.conversationId;
   assert.equal((await call('/conversations/'+conversation,'GET',undefined,'parent')).status,404);
   assert.equal((await call('/conversations/'+conversation+'/start','POST',{})).status,200);
@@ -76,7 +76,7 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   const after=await call('/dashboard');assert.equal(after.data.balanceYen,5);assert.equal(after.data.lifetimeEarnedYen,100);assert.equal(after.data.goals.length,0);
  });
  await t.test('an agreed proposal cannot create a new private revision conversation',async()=>{
-  const c=await call('/conversations','POST',{proposalId:proposal},'parent');assert.equal(c.status,409);assert.equal(c.error.code,'INVALID_STATE');
+  const c=await call('/conversations','POST',{proposalId:proposal},'parent');assert.equal(c.status,403);assert.equal(c.error.code,'FORBIDDEN');
  });
  await t.test('invalid child settings fail before creating an auth account',async()=>{
   const result=await call('/children','POST',{displayName:'新しい子',birthDate:'2018-04-01',rewardGuidelines:{smallJpy:1000,mediumJpy:100,largeJpy:10000}},'parent');
@@ -95,11 +95,11 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
  await t.test('explicit search endpoint carries a query and target child context without private child preferences',async()=>{
   let captured:any;
   const searchApp=createApp(config,{db,ai:async input=>{captured=parseAIInput(input);return {requestId:input.requestId,action:'HEARING',reply:'候補がありません',search:null};},enrich:async p=>p,image:async()=>null,qr:async()=>''});
-  const c=await call('/conversations','POST',{childId:child},'parent');
-  await call('/conversations/'+c.data.conversationId+'/start','POST',{},'parent');
-  const response=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'Switch スプラトゥーン'})}));
-  assert.equal(response.status,200);assert.equal(captured.role,'parent');assert.equal(captured.searchQuery,'Switch スプラトゥーン');assert.equal(captured.childContext.gradeLevel,4);assert.ok(captured.childContext.age<captured.profile.age);
-  const fromChat=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({fromConversation:true})}));
+  const c=await call('/conversations','POST',{});
+  await call('/conversations/'+c.data.conversationId+'/start','POST',{});
+  const response=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'Switch スプラトゥーン'})}));
+  assert.equal(response.status,200);assert.equal(captured.role,'child');assert.equal(captured.searchQuery,'Switch スプラトゥーン');assert.equal(captured.childContext.gradeLevel,4);assert.ok(captured.childContext.age===captured.profile.age);
+  const fromChat=await searchApp(new Request(config.origin+'/api/conversations/'+c.data.conversationId+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({fromConversation:true})}));
   assert.equal(fromChat.status,200);assert.equal(captured.searchQuery,undefined);
   assert.match(captured.message,/これまでの相談内容/);
   assert.ok(captured.history.some((m:any)=>m.sender==='user'&&m.content.includes('Switch スプラトゥーン')));
@@ -127,15 +127,15 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   jar=ownJar;const complete=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(complete.status,200);assert.equal(complete.data.user.role,'child');
  });
  await t.test('AI quota and timeout errors survive HTTP translation without exposing upstream details',async()=>{
-  const c=await call('/conversations','POST',{childId:child},'parent');assert.equal(c.status,201);const cid=c.data.conversationId;
-  assert.equal((await call('/conversations/'+cid+'/start','POST',{},'parent')).status,200);
+  const c=await call('/conversations','POST',{});assert.equal(c.status,201);const cid=c.data.conversationId;
+  assert.equal((await call('/conversations/'+cid+'/start','POST',{})).status,200);
   for(const [failure,status,code,expected] of [
    [new ConversationError('RATE_LIMIT','sensitive-upstream-details'),429,'RATE_LIMITED',/利用上限/],
    [new ConversationError('TIMEOUT','sensitive-upstream-details'),502,'AI_UNAVAILABLE',/時間内/],
    [new Error('sensitive-upstream-details'),502,'AI_UNAVAILABLE',/返答を取得できません/],
   ] as const){
    const failing=createApp(config,{db,ai:async()=>{throw failure;},enrich:async p=>p,image:async()=>null,qr:async()=>''});
-   const response=await failing(new Request(config.origin+'/api/conversations/'+cid+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenParent,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'工作キット'})}));
+   const response=await failing(new Request(config.origin+'/api/conversations/'+cid+'/search',{method:'POST',headers:{cookie:'wb_local_session='+tokenChild,origin:config.origin,'x-csrf-token':'csrf','Content-Type':'application/json'},body:JSON.stringify({query:'工作キット'})}));
    const payload=await response.json();
    assert.equal(response.status,status);assert.equal(payload.error.code,code);assert.match(payload.error.message,expected);
    assert.ok(!JSON.stringify(payload).includes('sensitive-upstream-details'));

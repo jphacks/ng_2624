@@ -69,18 +69,19 @@ test('database migrations, private proposals, chores, purchases and pairing', as
   const row=(await db.query('select sum(delta_amount_yen)::integer as balance,sum(greatest(delta_amount_yen,0))::integer as acquired from amount_transactions')).rows[0];
   assert.deepEqual(row,{balance:5,acquired:100});
  });
- await t.test('parent proposal and child revision keep source conversations private; price snapshot, slot and balance checks',async()=>{
-  const parentConv=id(21);
-  await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id,started_at) values('${parentConv}','${parent}','${child}','${product}',now());`);
-  const parentDraft=await rpc('wb_save_proposal',[parent,parentConv,product,'親から提案',[], 'small']);
-  await rpc('wb_send_proposal',[parent,parentDraft.id,parentDraft.version,null]);
-  await rpc('wb_review_proposal',[child,parentDraft.id,parentDraft.version,'revision_requested','条件を変えたい']);
-  const revision=await rpc('wb_save_proposal',[child,conv,product,'子から修正',[], 'small',null,null,parentDraft.id]);
+ await t.test('child proposal and parent revision keep source conversations private; price snapshot, slot and balance checks',async()=>{
+  const parentConv=id(21),revisionConv=id(24);
+  await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id,started_at) values('${parentConv}','${child}','${child}','${product}',now());`);
+  const parentDraft=await rpc('wb_save_proposal',[child,parentConv,product,'子から提案',[], 'small']);
+  await rpc('wb_send_proposal',[child,parentDraft.id,parentDraft.version,parent]);
+  await rpc('wb_review_proposal',[parent,parentDraft.id,parentDraft.version,'revision_requested','条件を変えたい']);
+  await db.exec(`insert into conversations(id,user_id,child_id,selected_product_id,context_proposal_id) values('${revisionConv}','${parent}','${child}','${product}','${parentDraft.id}')`);
+  const revision=await rpc('wb_save_proposal',[parent,revisionConv,product,'親から修正',[], 'small',null,null,parentDraft.id]);
   assert.equal(revision.negotiation_id,null);
-  await rpc('wb_send_proposal',[child,revision.id,revision.version,parent]);
-  await assert.rejects(rpc('wb_review_proposal',[parent,parentDraft.id,parentDraft.version,'rejected',null]),/Already answered|awaiting approval/);
+  await rpc('wb_send_proposal',[parent,revision.id,revision.version,null]);
+  await assert.rejects(rpc('wb_review_proposal',[child,parentDraft.id,parentDraft.version,'rejected',null]),/Already answered|awaiting approval/);
   await db.exec(`update products set price_jpy=999 where id='${product}'`);
-  await rpc('wb_review_proposal',[parent,revision.id,revision.version,'approved',null]);
+  await rpc('wb_review_proposal',[child,revision.id,revision.version,'approved',null]);
   const goal=(await db.query('select * from goals where proposal_id=$1',[revision.id])).rows[0];
   assert.equal(goal.target_amount_yen,95);
   await assert.rejects(rpc('wb_purchase_goal',[parent,goal.id]),/Insufficient balance/);

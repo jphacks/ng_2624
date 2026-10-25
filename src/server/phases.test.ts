@@ -5,7 +5,7 @@ import { createDemo, readDemoConfig } from '../../demo/app.ts';
 import { parseAIInput } from '../ai/validation.ts';
 import type { AIInput, AIOutput } from '../../Sample_db/types.ts';
 
-test('explicit consultation, No-triggered shared negotiation, private drafts, and same-version agreement',async t=>{
+test('child proposal journey, gated parent negotiation, private drafts, agreement and final decline',async t=>{
  const config=readDemoConfig({DEMO_PORT:'3991',GEMINI_API_KEY:'test'});
  const inputs:AIInput[]=[];
  const demo=await createDemo(config,{ai:async raw=>{
@@ -31,8 +31,16 @@ test('explicit consultation, No-triggered shared negotiation, private drafts, an
  async function login(b:ReturnType<typeof browser>,role:string){await b.call('/demo/state');assert.equal((await b.call('/demo/login','POST',{role})).status,200);return (await b.call('/auth/session')).data.user;}
  async function okay(b:ReturnType<typeof browser>,path:string,method='GET',body?:unknown){const r=await b.call(path,method,body);assert(r.status<300,JSON.stringify(r));return r.data;}
  try {
-  const childUser=await login(child,'child');await login(parent,'parent');
+  const childUser=await login(child,'child'),parentUser=await login(parent,'parent');
   let c:any,p:any,nId='',repair:any;
+  await t.test('parents cannot start a private chat, including existing chats and direct database calls',async()=>{
+   assert.equal((await parent.call('/conversations','POST',{childId:childUser.id})).status,403);
+   const old=(await demo.db.insert('conversations',{user_id:parentUser.id,child_id:childUser.id}))[0];
+   for(const suffix of ['start','messages','proposal-drafts'])assert.equal((await parent.call('/conversations/'+old.id+'/'+suffix,'POST',{message:'相談したい'})).status,403);
+   await assert.rejects(demo.db.rpc('wb_start_consultation',{p_actor_id:parentUser.id,p_conversation_id:old.id}),/phase/);
+   assert.equal(inputs.length,0);
+   assert.equal((await okay(parent,'/proposals/received')).proposals.length,0);
+  });
   await t.test('unstarted threads reject both API and database writes without calling AI',async()=>{
    c=await okay(child,'/conversations','POST',{});assert.equal(c.phase,'not_started');assert.equal(c.canMessage,false);
    for(const suffix of ['messages','search','proposal-drafts','selected-product'])assert.equal((await child.call('/conversations/'+c.conversationId+'/'+suffix,'POST',{message:'やあ',query:'商品'})).status,409);
@@ -43,15 +51,24 @@ test('explicit consultation, No-triggered shared negotiation, private drafts, an
   await t.test('send ends individual consultation and awaits a response, without opening shared chat',async()=>{
    await okay(child,'/conversations/'+c.conversationId+'/messages','POST',{message:'個別の秘密です'});
    c=await okay(child,'/conversations/'+c.conversationId+'/messages','POST',{message:'商品を探す'});
-   await okay(child,'/conversations/'+c.conversationId+'/selected-product','PATCH',{selectedProductId:c.products[0].id});
+   const callsBeforeSelection=inputs.length;
+   const selected=await okay(child,'/conversations/'+c.conversationId+'/selected-product','PATCH',{selectedProductId:c.products[0].id});
+   assert.match(selected.messages.at(-1).content,/ほしい理由/);
+   assert.equal(selected.messages.at(-1).sender,'assistant');
+   assert.equal(inputs.length,callsBeforeSelection);
+   const repeated=await okay(child,'/conversations/'+c.conversationId+'/selected-product','PATCH',{selectedProductId:c.products[0].id});
+   assert.equal(repeated.messages.length,selected.messages.length);
    c=await okay(child,'/conversations/'+c.conversationId+'/proposal-drafts','POST',{});p=c.currentProposal;
+   assert.equal((await okay(parent,'/proposals/received')).proposals.length,0);
    const sent=await okay(child,'/proposals/'+p.id+'/send','POST',{version:p.version});nId=sent.negotiationId;
+   const received=(await okay(parent,'/proposals/received')).proposals;
+   assert.equal(received.length,1);assert.equal(received[0].canRespond,true);assert.equal(received[0].canConsult,false);
    assert.equal((await okay(child,'/conversations/'+c.conversationId)).phase,'awaiting_response');
    assert.equal((await child.call('/conversations/'+c.conversationId+'/messages','POST',{message:'送れない'})).status,409);
    assert.equal((await parent.call('/negotiations/'+nId+'/messages','POST',{message:'まだ交渉前'})).status,409);
    assert.equal((await okay(parent,'/negotiations')).negotiations.length,0);
   });
-  await t.test('No starts shared negotiation and only shared messages enter AI history',async()=>{
+  await t.test('requesting discussion starts shared negotiation and only shared messages enter AI history',async()=>{
    await okay(parent,'/proposals/'+p.id+'/responses','POST',{version:p.version,decision:'revision_requested',reason:'使う時間の条件を相談したい'});
    assert.equal((await okay(child,'/conversations/'+c.conversationId)).phase,'negotiation');
    const n=await okay(parent,'/negotiations/'+nId);assert.equal(n.phase,'negotiation');assert.equal(n.messages.length,0);
@@ -81,6 +98,23 @@ test('explicit consultation, No-triggered shared negotiation, private drafts, an
    assert.equal((await okay(child,'/conversations/'+c.conversationId)).phase,'closed');
    for(const suffix of ['messages','proposal-drafts','selected-product'])assert.equal((await parent.call('/negotiations/'+nId+'/'+suffix,suffix==='selected-product'?'PATCH':'POST',{message:'終了後',selectedProductId:c.products[0].id})).status,409);
    await assert.rejects(demo.db.rpc('wb_begin_negotiation_ai',{p_actor_id:childUser.id,p_negotiation_id:nId,p_lock_id:randomUUID()}),/phase/);
+   assert.equal((await okay(child,'/dashboard')).goals.length,1);
+  });
+  await t.test('final decline shares the reason, closes the request, and never opens negotiation or creates a goal',async()=>{
+   let next=await okay(child,'/conversations','POST',{});
+   const base='/conversations/'+next.conversationId;
+   await okay(child,base+'/start','POST',{});
+   next=await okay(child,base+'/messages','POST',{message:'商品を探す'});
+   await okay(child,base+'/selected-product','PATCH',{selectedProductId:next.products[0].id});
+   next=await okay(child,base+'/proposal-drafts','POST',{});const draft=next.currentProposal;
+   const sent=await okay(child,'/proposals/'+draft.id+'/send','POST',{version:draft.version});
+   const answered=await okay(parent,'/proposals/'+draft.id+'/responses','POST',{version:draft.version,decision:'rejected',reason:'今回は購入しません'});
+   assert.equal(answered.negotiationStatus,'closed');assert.equal(answered.canConsult,false);
+   const visible=await okay(child,'/proposals/'+draft.id);
+   assert.equal(visible.negotiationResult.reason,'今回は購入しません');
+   assert.equal((await okay(child,base)).phase,'closed');
+   assert.equal((await parent.call('/negotiations/'+sent.negotiationId+'/messages','POST',{message:'再開できない'})).status,409);
+   await assert.rejects(demo.db.rpc('wb_begin_negotiation_ai',{p_actor_id:parentUser.id,p_negotiation_id:sent.negotiationId,p_lock_id:randomUUID()}),/phase/);
    assert.equal((await okay(child,'/dashboard')).goals.length,1);
   });
  } finally {await demo.close();}

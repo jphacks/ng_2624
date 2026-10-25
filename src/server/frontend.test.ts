@@ -128,7 +128,7 @@ test('parent and child receive different chat introduction and settings links',a
  const ui=await frontend(async path=>path==='/auth/session'?childSession:path==='/conversations/chat'?{messages:[],products:[]}:basic(path));
  await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/ぽぽだよ/);
  assert.match(ui.nodes['#navigation'].innerHTML,/じぶんの設定/);assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/子ども一覧/);
- ui.state.session=session;await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/お子さんの目標/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/ぽぽだよ/);
+ ui.state.session=session;await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/子どもから届いたおねがい/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"|data-action="new-chat"/);
 });
 
 
@@ -147,12 +147,13 @@ test('composer follows server phase and introduction stays before all conversati
  const thread:any={conversationId:'chat',mode:'consultation',phase:'not_started',canMessage:false,messages:[{sender:'assistant',content:'以前の返答'}],products:[]};
  const starts:string[]=[];
  const ui=await frontend(async path=>{
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
   if(path==='/conversations/chat/start'){starts.push(path);thread.phase='consultation';thread.canMessage=true;return thread;}
   return path==='/conversations/chat'?thread:basic(path);
  });
  await ui.chat('chat');let html=ui.nodes['#content'].innerHTML;
  assert.match(html,/data-form="message"/);assert.equal(starts.length,1);
- assert.ok(html.indexOf('ぽぽです。')<html.indexOf('以前の返答'));assert.match(html,/message-avatar/);
+ assert.ok(html.indexOf('ぽぽだよ。')<html.indexOf('以前の返答'));assert.match(html,/message-avatar/);
  await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);assert.equal(starts.length,1);
  for(const phase of ['awaiting_response','closed']){thread.phase=phase;thread.canMessage=false;await ui.chat('chat');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"|data-form="search-products"/);}
 });
@@ -340,41 +341,33 @@ test('small screen label follows the signed-in role, including child details and
  assert.equal(ui.nodes['#role-label'].textContent,'');
 });
 
-test('unified chat starts the personal thread and retains child buttons and shared chat routing',async()=>{
- const calls:string[]=[];
- const thread={conversationId:'latest',mode:'consultation',phase:'not_started',canMessage:false,messages:[],products:[]};
+test('parent has no personal chat and enters only a submitted proposal negotiation',async()=>{
+ const calls:string[]=[];let received:any[]=[];
  const ui=await frontend(async(path,method)=>{
   calls.push((method||'GET')+' '+path);
-  if(path==='/children')return {children:[{childId:'child',displayName:'一人目'},{childId:'other',displayName:'二人目'}]};
-  if(path.startsWith('/conversations?'))return {conversations:[{conversationId:'old',updatedAt:'2026-10-24'},{conversationId:'latest',updatedAt:'2026-10-25'}]};
-  if(path==='/negotiations')return {negotiations:[{negotiationId:'shared',childId:'child'},{negotiationId:'other-shared',childId:'other'}]};
-  if(path==='/negotiations/shared')return {...thread,mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true};
-  if(path==='/conversations/latest/start')return {...thread,phase:'consultation',canMessage:true};
-  if(path.startsWith('/conversations/'))return {...thread,conversationId:path.split('/')[2]};
+  if(path==='/proposals/received')return {proposals:received};
+  if(path==='/negotiations/shared')return {mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,messages:[],products:[]};
   return basic(path);
  });
+ assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/#conversations/);
  await ui.go('#conversations');
- const html=ui.nodes['#content'].innerHTML;
- assert.equal(ui.state.chat.conversationId,'latest');
- assert.match(html,/class="chat-child-toggle"/);assert.match(html,/data-action="select-chat-child"/);assert.match(html,/一人目/);assert.match(html,/二人目/);
- assert.match(html,/data-action="new-chat"/);assert.match(html,/data-id="child" aria-pressed="true"/);
- assert.doesNotMatch(html,/data-id="other-shared"/);assert.match(html,/data-form="message"/);
- assert.deepEqual(calls.filter(call=>call.startsWith('POST ')),['POST /conversations/latest/start']);
- assert.equal(ui.nodes['#content'].classList.contains('chat-layout-v3'),true);
- assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
- await ui.action('open-chat','old');assert.equal(ui.location.hash,'#conversation/old');
- await ui.action('open-negotiation','shared');assert.equal(ui.location.hash,'#negotiation/shared');
- assert.match(ui.nodes['#content'].innerHTML,/placeholder="親子に公開するメッセージ"/);
- assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="search-product-now"/);
- assert.match(ui.nodes['#content'].innerHTML,/data-action="new-chat"/);
- await ui.action('select-chat-child','other');
- assert.equal(ui.location.hash,'#conversations');
- assert.equal(ui.state.childId,'other');
- assert.ok(calls.includes('GET /conversations?childId=other'));
- assert.match(ui.nodes['#content'].innerHTML,/data-id="other" aria-pressed="true"/);
- assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-id="shared"/);
- await ui.go('#home');assert.match(ui.nodes['#content'].innerHTML,/子ども一覧/);
- assert.equal(ui.nodes['#content'].classList.contains('chat-layout-v3'),false);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"|data-action="new-chat"/);
+ await assert.rejects(ui.action('new-chat'),/子どもから届いた/);
+ assert.equal(calls.some(c=>c.includes('/conversations')),false);
+ received=[{proposal:{id:'request',negotiationId:'shared',status:'pending'},product:{name:'図鑑'},childDisplayName:'子',canRespond:true,canConsult:false}];
+ await ui.go('#home');
+ assert.match(ui.nodes['#content'].innerHTML,/図鑑/);
+ assert.match(ui.nodes['#content'].innerHTML,/内容を確認して返事する/);
+ assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/#conversations/);
+ received[0]={...received[0],proposal:{...received[0].proposal,status:'rejected'},canRespond:false,canConsult:true,negotiationId:'shared',negotiationStatus:'revision_requested'};
+ await ui.go('#home');
+ assert.match(ui.nodes['#navigation'].innerHTML,/#conversations/);
+ await ui.go('#conversations');
+ assert.match(ui.nodes['#content'].innerHTML,/data-action="open-negotiation"/);
+ await ui.action('open-negotiation','shared');
+ assert.match(ui.nodes['#content'].innerHTML,/親子に公開するメッセージ/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="new-chat"/);
+ assert.equal(calls.some(c=>c.startsWith('POST ')),false);
 });
 
 test('new unified chat uses existing create, start and product search endpoints',async()=>{
@@ -460,4 +453,53 @@ test('cancelling the new-chat confirmation changes nothing',async()=>{
  await ui.action('new-chat');
  assert.deepEqual(calls.filter(call=>!call.startsWith('GET ')),[]);
  assert.equal(ui.location.hash,'#conversation/old');
+});
+
+test('selected product leads to discussion, draft review and one save-and-send action',async()=>{
+ const calls:{path:string,method:string,body:any}[]=[];
+ const product={id:'product',name:'図鑑',priceJpy:1000};
+ let draft={id:'draft',productId:'product',status:'draft',version:1,persuasionText:'星を調べたい',purchaseConditions:['大切に使う']};
+ const thread={conversationId:'chat',mode:'consultation',phase:'consultation',canMessage:true,messages:[{sender:'assistant',content:'ほしい理由を教えてね'}],products:[product],selectedProductId:'product',currentProposal:null as any};
+ const ui=await frontend(async(path,method='GET',body)=>{
+  calls.push({path,method,body});
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path==='/conversations/chat')return thread;
+  if(path==='/conversations/chat/proposal-drafts')return {...thread,currentProposal:draft};
+  if(path==='/proposals/draft'&&method==='PATCH'){draft={...draft,...body,version:2};return {proposal:draft,product,canEdit:true};}
+  if(path==='/proposals/draft/send'){assert.equal(body.version,2);draft={...draft,status:'pending'};return {proposal:draft,product};}
+  if(path==='/proposals/draft')return {proposal:draft,product,canEdit:draft.status==='draft'};
+  return basic(path);
+ });
+ await ui.go('#conversation/chat');
+ assert.match(ui.nodes['#content'].innerHTML,/ほしい理由を教えてね/);
+ assert.match(ui.nodes['#content'].innerHTML,/えらんだ しょうひん/);
+ assert.match(ui.nodes['#content'].innerHTML,/別の商品を選び直す/);
+ await ui.action('generate-proposal');
+ assert.equal(ui.location.hash,'#proposal/draft');
+ assert.match(ui.nodes['#content'].innerHTML,/おうちの人に相談する/);
+ assert.match(ui.nodes['#content'].innerHTML,/個別の会話は共有しません/);
+ await ui.submit('edit-proposal','draft',{persuasionText:'星をもっと調べたい',purchaseConditions:'大切に使う'});
+ assert.deepEqual(calls.filter(c=>c.method!=='GET').map(c=>c.method+' '+c.path),['POST /conversations/chat/proposal-drafts','PATCH /proposals/draft','POST /proposals/draft/send']);
+ assert.match(ui.nodes['#content'].innerHTML,/へんじまち/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="edit-proposal"/);
+});
+
+test('parent response starts discussion only on revision and final decline stays closed',async()=>{
+ let decision='revision_requested';
+ const proposal={id:'request',status:'pending',version:1,persuasionText:'ほしい',purchaseConditions:['大切に使う']};
+ const ui=await frontend(async(path,method)=>{
+  if(path==='/proposals/request/responses')return {canConsult:decision==='revision_requested',negotiationId:'shared'};
+  if(path==='/negotiations/shared')return {mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,products:[],messages:[]};
+  if(path==='/proposals/request')return {proposal:{...proposal,status:'rejected'},negotiationStatus:'closed',negotiationResult:{reason:'今回は購入しません'}};
+  return basic(path);
+ });
+ ui.state.proposal={proposal};
+ await ui.submit('respond-proposal','request',{decision,reason:'使う時間を相談したい'});
+ assert.equal(ui.location.hash,'#negotiation/shared');
+ decision='rejected';ui.state.proposal={proposal};
+ await ui.go('#proposal/request');
+ await ui.submit('respond-proposal','request',{decision,reason:'今回は購入しません'});
+ assert.match(ui.nodes['#content'].innerHTML,/今回は見送り/);
+ assert.match(ui.nodes['#content'].innerHTML,/今回は購入しません/);
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="consult-proposal"/);
 });
