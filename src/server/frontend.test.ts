@@ -164,7 +164,8 @@ test('shared chat uses negotiation endpoints and exposes only the active shared 
  ui.state.chat=thread;
  await ui.submit('message','',{message:'条件に賛成します'});
  assert.equal(calls[0],'/negotiations/shared/messages');
- assert.match(ui.nodes['#content'].innerHTML,/親子に公開するメッセージ/);assert.match(ui.nodes['#content'].innerHTML,/共有交渉中/);
+ // The chat header was removed for space; the composer placeholder still says the chat is shared.
+ assert.match(ui.nodes['#content'].innerHTML,/placeholder="親子に公開するメッセージ"/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/chat-intro/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="search-products"/);
  thread.phase='closed';thread.canMessage=false;
  await ui.submit('message','',{message:'テスト応答の再表示'});
@@ -363,8 +364,9 @@ test('unified chat starts the personal thread and retains child buttons and shar
  assert.match(ui.nodes['#content'].innerHTML,/data-form="message"/);
  await ui.action('open-chat','old');assert.equal(ui.location.hash,'#conversation/old');
  await ui.action('open-negotiation','shared');assert.equal(ui.location.hash,'#negotiation/shared');
- assert.match(ui.nodes['#content'].innerHTML,/親子に公開するメッセージ/);
+ assert.match(ui.nodes['#content'].innerHTML,/placeholder="親子に公開するメッセージ"/);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="search-product-now"/);
+ assert.match(ui.nodes['#content'].innerHTML,/data-action="new-chat"/);
  await ui.action('select-chat-child','other');
  assert.equal(ui.location.hash,'#conversations');
  assert.equal(ui.state.childId,'other');
@@ -403,4 +405,59 @@ test('new unified chat uses existing create, start and product search endpoints'
  await ui.submit('message','',{message:'続きの相談です'});
  assert.equal(posts.at(-1)?.path,'/conversations/new/messages');
  assert.equal(scroller.scrollTop,2400);
+});
+
+test('chat has one new-chat button beside product search, replaces the old chat and keeps the menu',async()=>{
+ const calls:string[]=[];let failDelete=false,phase='consultation',currentProposal:any=null;
+ const ui=await frontend(async(path,method)=>{
+  calls.push((method||'GET')+' '+path);
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path==='/conversations'&&method==='POST')return {conversationId:'new'};
+  if(path==='/conversations/old'&&method==='DELETE'){if(failDelete)throw Object.assign(Error('ぽぽが返事を作っています。'),{code:'INVALID_STATE'});return {conversationId:'old',deleted:true};}
+  if(path.startsWith('/conversations/'))return {conversationId:path.split('/')[2],mode:'consultation',phase,canMessage:phase==='consultation',messages:[],products:[],currentProposal};
+  return basic(path);
+ });
+ const changes=()=>calls.filter(call=>!call.startsWith('GET '));
+ await ui.go('#conversation/old');
+ const html=ui.nodes['#content'].innerHTML;
+ assert.doesNotMatch(html,/ぽぽとチャット|chat-intro|delete-chat/);
+ assert.match(html,/<div class="chat-actions">[^<]*<button[^>]*data-action="search-product-now"[^]*?data-action="new-chat"[^]*?<\/div><form class="proposal-form" data-form="message"/);
+ assert.match(html,/placeholder="ぽぽへのメッセージ"/);
+ assert.equal(ui.nodes['#navigation'].hidden,false);
+ assert.match(ui.nodes['#navigation'].innerHTML,/#home[^]*#conversations[^]*#settings/);
+
+ await ui.action('new-chat');
+ assert.deepEqual(changes(),['POST /conversations','DELETE /conversations/old']);
+ assert.equal(ui.location.hash,'#conversation/new');
+ assert.equal(ui.state.chat.conversationId,'new');
+
+ // A refused delete must not stop the new chat from opening.
+ calls.length=0;failDelete=true;
+ await ui.go('#conversation/old');await ui.action('new-chat');
+ assert.deepEqual(changes(),['POST /conversations','DELETE /conversations/old']);
+ assert.equal(ui.location.hash,'#conversation/new');
+ assert.equal(ui.nodes['#notice'].textContent,'');
+
+ // Chats with a proposal are kept; the button is still offered after the chat can no longer send.
+ calls.length=0;failDelete=false;phase='awaiting_response';currentProposal={id:'proposal'};
+ await ui.go('#conversation/old');
+ assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="search-product-now"/);
+ assert.match(ui.nodes['#content'].innerHTML,/data-action="new-chat"/);
+ await ui.action('new-chat');
+ assert.deepEqual(changes(),['POST /conversations']);
+ assert.equal(ui.location.hash,'#conversation/new');
+});
+
+test('cancelling the new-chat confirmation changes nothing',async()=>{
+ const calls:string[]=[];
+ const ui=await frontend(async(path,method)=>{
+  calls.push((method||'GET')+' '+path);
+  if(path==='/auth/session')return {...session,user:{...session.user,role:'child'}};
+  if(path.startsWith('/conversations/'))return {conversationId:'old',mode:'consultation',phase:'consultation',canMessage:true,messages:[],products:[]};
+  return basic(path);
+ },()=>false);
+ await ui.go('#conversation/old');
+ await ui.action('new-chat');
+ assert.deepEqual(calls.filter(call=>!call.startsWith('GET ')),[]);
+ assert.equal(ui.location.hash,'#conversation/old');
 });
