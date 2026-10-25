@@ -87,3 +87,22 @@ test('Amazon source resolution accepts product paths and rejects other destinati
   const blocked=createProductPreview({resolve:async()=>[{address:'127.0.0.1',family:4}],read:async()=>{throw Error('must not fetch');}});
   assert.equal(await blocked.resolveAmazonProductUrl('https://amzn.to/test'),null);
 });
+
+test('ゲーム3件は画像取得が拒否されても全件表示用に残る',async()=>{
+  const preview=createProductPreview({resolve:async()=>[publicAddress],read:async()=>({status:503,headers:{},body:Buffer.alloc(0)})});
+  const candidates=Array.from({length:3},(_,i)=>({...product,id:`game-${i}`,name:`ゲーム${i}`,productUrl:`https://www.amazon.co.jp/dp/B00000000${i}`,sourceUrls:[`https://www.amazon.co.jp/dp/B00000000${i}`]}));
+  const result=await Promise.all(candidates.map(p=>preview.prepareProduct(p)));
+  assert.equal(result.filter(Boolean).length,3);assert.ok(result.every(p=>p?.imageUrl===null));
+});
+test('検索の引用リンクの解決失敗でゲーム候補を削除せず、未確認と明示する',async()=>{
+  const preview=createProductPreview({resolve:async()=>[publicAddress],read:async()=>{throw new Error('upstream unavailable');}});
+  const source='https://vertexaisearch.cloud.google.com/grounding-api-redirect/source-1';
+  const candidate={...product,name:'ゲーム',productUrl:source,sourceUrls:[source]};
+  const result=await preview.prepareProduct(candidate);
+  assert.equal(result?.name,'ゲーム');assert.equal(result?.productUrl,source);assert.equal(result?.imageUrl,null);
+  assert.match(result!.recommendationReason,/未確認/);
+  assert.equal(await preview.prepareProduct({...candidate,sourceUrls:[]}),null);
+  for(const value of ['https://evil.test/product','https://vertexaisearch.cloud.google.com.evil.test/grounding-api-redirect/id','http://vertexaisearch.cloud.google.com/grounding-api-redirect/id','https://vertexaisearch.cloud.google.com/other']){
+    assert.equal(await preview.prepareProduct({...candidate,productUrl:value,sourceUrls:[value]}),null);
+  }
+});
