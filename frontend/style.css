@@ -1292,3 +1292,24 @@ body:has(#content.chat-layout-v3) {
   pointer-events: none;
 }
 .role-label[hidden] { display: none; }
+
+/* お手伝いカード：状態ごとの色と右上の大きなラベル */
+.chore-status {
+  float: right;
+  margin: -4px -4px 8px 12px;
+  max-width: 120px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: center;
+}
+.chore-card.is-approved { background: #ffe3e3; border-color: #f4a6a6; }
+.chore-card.is-approved .chore-status { background: #d93636; color: #fff; }
+.chore-card.is-rejected { background: #e0eeff; border-color: #9cc3f2; }
+.chore-card.is-rejected .chore-status { background: #1f6fc4; color: #fff; }
+.chore-card.is-waiting { background: #eeeeee; border-color: #c9c9c9; }
+.chore-card.is-waiting .chore-status { background: #6b6b6b; color: #fff; }
