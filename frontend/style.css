@@ -1314,6 +1314,7 @@ body:has(#content.chat-layout-v3) {
   line-height: 1.3;
   text-align: center;
 }
+.chore-status-icon { display: block; font-size: 24px; line-height: 1.2; }
 .chore-card.is-approved { background: #ffe3e3; border-color: #f4a6a6; }
 .chore-card.is-approved .chore-status { background: #d93636; color: #fff; }
 .chore-card.is-rejected { background: #e0eeff; border-color: #9cc3f2; }
