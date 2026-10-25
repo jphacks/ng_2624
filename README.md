@@ -1,5 +1,3 @@
-> アプリの起動は `npm start`。Supabase・Googleログイン・公開環境の設定は [SETUP.md](SETUP.md) を参照してください。
-
 # サンプル（プロダクト名）
 
 [![IMAGE ALT TEXT HERE](https://jphacks.com/wp-content/uploads/2026/07/IMG_5316.png)](https://www.youtube.com/watch?v=piaNsc6ilBI)
@@ -21,15 +19,15 @@
 ## 開発技術
 ### 活用した技術
 #### API・データ
-* 
+*
 * 
 
 #### フレームワーク・ライブラリ・モジュール
-* 
+*
 * 
 
 #### デバイス
-* 
+*
 * 
 
 ### 独自技術
