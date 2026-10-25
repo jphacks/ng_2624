@@ -1,5 +1,5 @@
 import type { FEOperation, ProfilePatch } from '../../Sample_db/fe-be.ts';
-import type { AIUserProfile, UserRole } from '../../Sample_db/types.ts';
+import type { AIUserProfile, UserRole } from '../shared/types.ts';
 import { FE_REQUEST_DEFINITIONS } from './requests.ts';
 
 const DAY = 24 * 60 * 60 * 1000;

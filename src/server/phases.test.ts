@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createDemo, readDemoConfig } from '../../demo/app.ts';
 import { parseAIInput } from '../ai/validation.ts';
-import type { AIInput, AIOutput } from '../../Sample_db/types.ts';
+import type { AIInput, AIOutput } from '../shared/types.ts';
 
 test('child proposal journey, gated parent negotiation, private drafts, agreement and final decline',async t=>{
  const config=readDemoConfig({DEMO_PORT:'3991',GEMINI_API_KEY:'test'});

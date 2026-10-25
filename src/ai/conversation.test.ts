@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import type { Interactions } from '@google/genai';
-import type { AIInput, ProductCandidate, Proposal } from '../../Sample_db/types.ts';
+import type { AIInput, ProductCandidate, Proposal } from '../shared/types.ts';
 import { createReply } from './conversation.ts';
 import { ConversationError } from './errors.ts';
 import { generateGeminiReply, readGrounding } from './gemini.ts';

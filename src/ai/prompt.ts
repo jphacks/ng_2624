@@ -1,4 +1,4 @@
-import type { AIInput, GoalSize, NegotiationContext, ProductSearchContext, SearchMetadata } from '../../Sample_db/types.ts';
+import type { AIInput, GoalSize, NegotiationContext, ProductSearchContext, SearchMetadata } from '../shared/types.ts';
 import { DECISION_SCHEMA, PRODUCTS_SCHEMA } from './protocol.ts';
 import type { JsonSchema } from './protocol.ts';
 

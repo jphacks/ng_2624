@@ -1,12 +1,15 @@
-# WishBridge 共通データベース v0.1
+# 初期DB設計・サンプル資料
+
+このフォルダには初期設計と確認用の資料を置いています。現在のアプリが使う共通型は [`src/shared/types.ts`](../src/shared/types.ts)、現在のDB構築手順は [`SETUP.md`](../SETUP.md) と `supabase/migrations/` を参照してください。
 
 ## ファイル
 - `schema.sql`：Supabase PostgreSQL向けの22テーブルと外部キー・制約・初期RLS
-- `types.ts`：AI・フロント・バックエンド間の共通データ型（手書きのAPI契約）
+- `api.ts`・`fe-be.ts`：以前の接続処理（`src/connection/`）が参照するAPI契約。共通型は `src/shared/types.ts` から読み込む。
+- `demo.sqbpro`：サンプルDBを確認するためのSQLiteビューアのプロジェクト
 - `demo.sqlite`：親子1組の動作例が入った**ローカル確認専用**サンプルDB
 - `demo_queries.sql`：サンプルDBの確認用SQL
 
-## Supabaseへの導入
+## 初期設計時のSupabaseへの導入手順（参考）
 1. 新規Supabaseプロジェクトを作成する。
 2. SQL Editorで `schema.sql` を実行する。
 3. Authenticationで親と子供のログイン方式を決める。`public.users.id` は `auth.users.id` と一致させる。
@@ -20,7 +23,7 @@
 
 ## チームの共通ルール
 - **AI担当**：`AIInput` を受け、`AIOutput` を返す。DBや送信処理には依存しない。
-- **フロント担当**：`types.ts` を参考に仮データで画面を作る。
+- **フロント担当**：`src/shared/types.ts` を参考に仮データで画面を作る。
 - **バックエンド担当**：SQL、認証、RLS、承認状態、送信、ポイント付与を実装する。
 - **承認**：親と子供が**同一proposal ID / version** を承認した場合だけ `agreed` にする。改訂時は新しいversionを作る。
 - **非公開会話**：相手の `messages` を渡さず、承認された `shared_conditions` だけを交渉AIへ渡す。

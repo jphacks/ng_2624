@@ -1,4 +1,4 @@
-import type { ProductSearchContext, ProductCandidate, SearchMetadata } from '../../Sample_db/types.ts';
+import type { ProductSearchContext, ProductCandidate, SearchMetadata } from '../shared/types.ts';
 import type { ReplyGenerator, GenerationResult } from './gemini.ts';
 import { buildExtractionRequest, buildSearchRequest } from './prompt.ts';
 import { parseProducts } from './protocol.ts';

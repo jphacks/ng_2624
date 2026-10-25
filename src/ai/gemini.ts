@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import type { Interactions } from '@google/genai';
-import type { ProductCandidate, SearchMetadata } from '../../Sample_db/types.ts';
+import type { ProductCandidate, SearchMetadata } from '../shared/types.ts';
 import { ConversationError } from './errors.ts';
 import type { ConversationRequest } from './prompt.ts';
 import { publicUrl } from './validation.ts';

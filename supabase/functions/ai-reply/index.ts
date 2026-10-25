@@ -6,7 +6,7 @@ import {
   createGeminiGenerator,
   searchAmazon,
 } from "../../../src/ai/index.ts";
-import type { AIInput } from "../../../Sample_db/types.ts";
+import type { AIInput } from "../../../src/shared/types.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

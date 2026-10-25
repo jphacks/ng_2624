@@ -1,4 +1,4 @@
-import type { AIInput, AIOutput } from '../../Sample_db/types.ts';
+import type { AIInput, AIOutput } from '../shared/types.ts';
 
 /** 実際の履歴取得・保存・目安金額の設定はバックエンドが担当する。 */
 export const demoInput: AIInput = {

@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { request } from 'node:https';
-import type { ProductCandidate } from '../../Sample_db/types.ts';
+import type { ProductCandidate } from '../shared/types.ts';
 
 export type PreviewImage = { body: Buffer; contentType: string };
 type Address = { address: string; family: number };

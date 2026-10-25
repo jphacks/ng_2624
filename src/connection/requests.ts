@@ -1,5 +1,5 @@
 import type { FEOperation, FERequestMap, GoogleAuthCallback } from '../../Sample_db/fe-be.ts';
-import type { UserRole } from '../../Sample_db/types.ts';
+import type { UserRole } from '../shared/types.ts';
 
 export type InputRule =
   | { kind: 'string'; max: number }

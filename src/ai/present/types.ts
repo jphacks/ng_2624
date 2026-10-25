@@ -1,5 +1,5 @@
 // 商品提示モジュール専用の型。
-// 共有の Sample_db/types.ts には依存しない。DBとの接続時は変換関数で詰め替える。
+// 共有の src/shared/types.ts には依存しない。DBとの接続時は変換関数で詰め替える。
 
 export type GoalSize = 'small' | 'medium' | 'large';
 

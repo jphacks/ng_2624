@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProductPreview, isPublicAddress } from './preview.ts';
-import type { ProductCandidate } from '../../Sample_db/types.ts';
+import type { ProductCandidate } from '../shared/types.ts';
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
 const product: ProductCandidate = { id: 'product-1', name: '商品', priceJpy: 3000, productUrl: 'https://shop.test/product', size: 'small', description: '', recommendationReason: '', sourceUrls: [], imageUrl: 'https://127.0.0.1/secret' };
 const publicAddress = { address: '93.184.216.34', family: 4 };

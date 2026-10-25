@@ -3,7 +3,7 @@ import { ConversationError } from '../ai/errors.ts';
 import { CONVERSATION_SEARCH_MESSAGE } from '../ai/prompt.ts';
 import { AppError, assert, text, uuid, integer, strings, date, randomToken, hash, equal, seal, unseal, cookie, cookieName, cookies, protectMutation, configured } from './core.ts';
 import type { Config, DB, Row } from './core.ts';
-import type { AIInput, AIOutput, ProductCandidate } from '../../Sample_db/types.ts';
+import type { AIInput, AIOutput, ProductCandidate } from '../shared/types.ts';
 
 interface Dependencies { db: DB; ai: (input: AIInput) => Promise<AIOutput>; enrich: (product: ProductCandidate) => Promise<ProductCandidate | null>; image: (url: string) => Promise<{ body: Buffer; contentType: string } | null>; qr: (url: string) => Promise<string>; }
 const DAY = 86400000;

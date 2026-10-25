@@ -1,6 +1,6 @@
 # 会話AIモジュール
 
-`src/ai/index.ts`の`createReply(input)`が、共通型v0.4（`Sample_db/types.ts`）の`AIInput`を受け取り、`AIOutput`を返す。
+`src/ai/index.ts`の`createReply(input)`が、共通型v0.4（`src/shared/types.ts`）の`AIInput`を受け取り、`AIOutput`を返す。
 個別相談、Amazonの商品検索、提案下書き、再交渉を扱う。BEが認証・共有許可・保存・送信・承認・合意成立判定・目標登録を担当する。
 
 ## ファイル構成

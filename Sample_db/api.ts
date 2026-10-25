@@ -1,5 +1,5 @@
 import type { AIOutput, AIUserProfile, ChatMessage, NegotiationMessage, NegotiationResult,
-  ProductCandidate, Proposal, PurchaseConstraints, RewardGuidelines, SharedCondition, UserRole } from './types.ts';
+  ProductCandidate, Proposal, PurchaseConstraints, RewardGuidelines, SharedCondition, UserRole } from '../src/shared/types.ts';
 import type { FEOperation } from './fe-be.ts';
 
 export interface ProfileView { displayName: string; profile: AIUserProfile }

@@ -1,4 +1,4 @@
-import type { AIInput, AIOutput, ProposalDraft } from '../../Sample_db/types.ts';
+import type { AIInput, AIOutput, ProposalDraft } from '../shared/types.ts';
 import { ConversationError, toConversationError } from './errors.ts';
 import { generateGeminiReply } from './gemini.ts';
 import type { ReplyGenerator } from './gemini.ts';

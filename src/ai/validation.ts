@@ -1,4 +1,4 @@
-import type { AIInput, AIUserProfile, ChatMessage, NegotiationMessage, ProductCandidate, Proposal, SharedCondition, NegotiationResult } from '../../Sample_db/types.ts';
+import type { AIInput, AIUserProfile, ChatMessage, NegotiationMessage, ProductCandidate, Proposal, SharedCondition, NegotiationResult } from '../shared/types.ts';
 import { ConversationError } from './errors.ts';
 
 function invalid(field: string): never {

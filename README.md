@@ -75,7 +75,8 @@
 | [src/server/](src/server/) | バックエンド。画面の配信とAPI、ログイン、商品画像の取得 | [SETUP.md](SETUP.md) |
 | [src/ai/](src/ai/) | 会話AI（個別相談・商品検索・提案の下書き・再交渉） | [src/ai/README.md](src/ai/README.md) |
 | [supabase/migrations/](supabase/migrations/) | DBのテーブル・権限・処理（SQL） | [SETUP.md](SETUP.md) |
-| [Sample_db/](Sample_db/) | AI・画面・サーバーで共通のデータの型と、最初のDB設計 | [Sample_db/README.md](Sample_db/README.md) |
+| [src/shared/](src/shared/) | AI・サーバーなどで共有するデータの型 | [src/shared/types.ts](src/shared/types.ts) |
+| [Sample_db/](Sample_db/) | 初期のDB設計・サンプルDB・以前のAPI契約 | [Sample_db/README.md](Sample_db/README.md) |
 | [demo/](demo/) | Google・Supabase なしで試せる手元専用デモ | [demo/README.md](demo/README.md) |
 | [docs/](docs/) | 画面の設計メモ | [docs/frontend-design.md](docs/frontend-design.md) |
 | [src/connection/](src/connection/)・[supabase/functions/](supabase/functions/) | 以前の構成の接続部品と Edge Function。今の構成では使わない（テストは残している） | — |

@@ -2,7 +2,7 @@
 import { createReply } from './conversation.ts';
 import { demoInput } from './demo.ts';
 import { toConversationError } from './errors.ts';
-import type { AIInput, AIOutput } from '../../Sample_db/types.ts';
+import type { AIInput, AIOutput } from '../shared/types.ts';
 
 function expect(condition: unknown, message: string): asserts condition {
     if (!condition) throw new Error(message);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { FEOperation, FERequestMap } from '../../Sample_db/fe-be.ts';
-import type { AIUserProfile } from '../../Sample_db/types.ts';
+import type { AIUserProfile } from '../shared/types.ts';
 import { FEInputError, FE_REQUEST_DEFINITIONS, parseFERequest, parseGoogleAuthCallback } from './requests.ts';
 import { AUTH_POLICY, applyProfilePatch, roleMayCall, sessionStatus } from './policy.ts';
 

@@ -1,4 +1,4 @@
-import type { GoalSize, ProductCandidate, RewardGuidelines } from '../../Sample_db/types.ts';
+import type { GoalSize, ProductCandidate, RewardGuidelines } from '../shared/types.ts';
 
 export const GOAL_SIZES: GoalSize[] = ['small', 'medium', 'large'];
 
