@@ -859,7 +859,7 @@ h1[tabindex="-1"]:focus { outline: none; }
 .brand-header { padding: 23px 28px 14px; text-align: center; }
 .brand { display: inline-flex; align-items: center; color: #009de4; font-size: 40px; font-weight: 900; letter-spacing: .03em; text-decoration: none; line-height: 1.3; }
 .brand-caption { display: block; margin-top: 4px; color: var(--text-sub); font-size: 11px; letter-spacing: .12em; }
-.dove { display: inline-block; width: 68px; height: 68px; background: #fff url("images/popo-doves.png") 50% 0 / 300% 200% no-repeat; }
+.dove { display: inline-block; width: 68px; height: 68px; background: #fff url("/images/popo-doves.png") 50% 0 / 300% 200% no-repeat; }
 .brand .dove { width: 72px; height: 66px; margin-left: 3px; background-position: 100% 0; }
 .screen { min-height: calc(100dvh - 165px); }
 .screen-start { padding: 14px 28px 24px; justify-content: space-evenly; gap: 18px; }
