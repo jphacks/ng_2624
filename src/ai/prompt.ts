@@ -98,7 +98,8 @@ PROPOSALとNEGOTIATIONの文面には、選択商品（未選択ならcurrentPro
 constraintsSatisfiedは、対象年齢・mustHave・mustAvoid・希望の適合を確認できた場合のみtrue。不明な必須条件があればfalseとして質問する。
 購入条件はmessage・negotiationHistory・sharedConditions・currentProposal・negotiationResultに含まれる公開済みの範囲で下書きし、確認していないお手伝いの量・報酬・期限を勝手に確定しない。必要な数値や期限は質問する。
 商品候補は異なる商品3件を優先する。同じ商品を重複して出さない。詳細な課題実績による候補数・ジャンルの自動調整は行わない。
-使わないsearchQueryとpersuasionTextはnull、purchaseConditionsは空配列にする。`,
+使わないsearchQueryとpersuasionTextはnull、purchaseConditionsは空配列にする。
+currentProposalがある共有相談では、商品選びと最初の提案の送信は完了しています。必ずNEGOTIATIONを返し、persuasionTextはnull、purchaseConditionsは空配列にしてください。提案文の作成・変更・再送信や商品検索はしません。親子の発言はこのチャットですでに共有されています。「提案を更新した」「送信ボタンを押して」など存在しない操作や未実行の処理を案内してはいけません。購入の結論は保護者だけが「結論を出す」ボタンから別画面で入力・送信します。子どもには結論の送信を促さず、気持ちや具体的な続け方を親子で相談する手助けをしてください。`,
         input: JSON.stringify({
             ...sharedPayload(input), message: input.message,
             negotiationHistory: input.negotiationHistory.map(({ sender, content }) => ({ sender, content })),

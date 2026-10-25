@@ -76,6 +76,16 @@ export async function createReply(
         if (input.mode === 'consultation' && decision.action === 'NEGOTIATION') {
             return { ...base, action: 'HEARING', reply: 'まず提案内容を確認してください。親への送信と回答の後、必要に応じて共有交渉へ進みます。' };
         }
+        // 共有相談では会話の整理だけを返し、モデルによる再提案・再検索・架空の送信案内を止める。
+        if (input.mode === 'negotiation' && input.currentProposal) {
+            if (['agreed', 'superseded'].includes(input.currentProposal.status)) return { ...base, action: 'NEGOTIATION', reply: 'この提案は確定済み、または更新済みです。最新の提案を確認してください。', proposalDraft: null };
+            const invalid = !['HEARING', 'NEGOTIATION'].includes(decision.action) || !!decision.persuasionText
+                || /(?:提案|おねがい|お願い|下書き).{0,25}(?:新しく|更新|修正|作り直|書き直|作成)|(?:送信|送る|おくる).{0,12}ボタン|ボタン.{0,12}(?:送信|送る|おくる)/u.test(decision.reply);
+            const reply = invalid ? input.role === 'parent'
+                ? '発言はお子さんにも共有されています。お互いの考えや、続けるための具体的な方法を相談しましょう。結論が決まったら「結論を出す」から入力できます。'
+                : 'いまの おはなしは、おうちのひとにも つたわっているよ。どうしたら つづけられそうか、いっしょに そうだんしてみよう。' : decision.reply;
+            return { ...base, action: 'NEGOTIATION', reply, proposalDraft: null };
+        }
         if (decision.action === 'HEARING') return { ...base, action: 'HEARING' };
         if (decision.action === 'SEARCH') {
             dependencies.onSearchStart?.();

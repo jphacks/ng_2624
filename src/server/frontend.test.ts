@@ -137,7 +137,7 @@ test('parent and child receive different chat introduction and settings links',a
  const ui=await frontend(async path=>path==='/auth/session'?childSession:path==='/conversations/chat'?{messages:[],products:[]}:basic(path));
  await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/ぽぽだよ/);
  assert.match(ui.nodes['#navigation'].innerHTML,/じぶんの設定/);assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/子ども一覧/);
- ui.state.session=session;await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/子どもから届いたおねがい/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"|data-action="new-chat"/);
+ ui.state.session=session;await ui.chat('chat');assert.match(ui.nodes['#content'].innerHTML,/相談中のおねがいはありません/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"|data-action="new-chat"/);
 });
 
 
@@ -243,7 +243,7 @@ test('demo tools do not change navigation or welcome layout',async()=>{
   assert.equal(demo.nodes['#demo-tools'].hidden,false);
   assert.equal(regular.nodes['#demo-tools'].hidden,true);
   assert.doesNotMatch(demo.nodes['#navigation'].innerHTML,/デモ操作/);
-  assert.equal([...demo.nodes['#navigation'].innerHTML.matchAll(/<a href=/g)].length,authenticated?3:4);
+  assert.equal([...demo.nodes['#navigation'].innerHTML.matchAll(/<a href=/g)].length,4);
   assert.match(demo.nodes['#navigation'].innerHTML,/href="#chores"/);
  }
 });
@@ -358,8 +358,10 @@ test('parent has no personal chat and enters only a submitted proposal negotiati
   if(path==='/negotiations/shared')return {mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,messages:[],products:[]};
   return basic(path);
  });
- assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/#conversations/);
+ assert.match(ui.nodes['#navigation'].innerHTML,/#conversations/);
  await ui.go('#conversations');
+ assert.match(ui.nodes['#content'].innerHTML,/相談中のおねがいはありません/);
+ assert.equal((ui.nodes['#navigation'].innerHTML.match(/<a href=/g)||[]).length,4);
  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"|data-action="new-chat"/);
  await assert.rejects(ui.action('new-chat'),/子どもから届いた/);
  assert.equal(calls.some(c=>c.includes('/conversations')),false);
@@ -367,7 +369,7 @@ test('parent has no personal chat and enters only a submitted proposal negotiati
  await ui.go('#home');
  assert.match(ui.nodes['#content'].innerHTML,/図鑑/);
  assert.match(ui.nodes['#content'].innerHTML,/内容を確認して返事する/);
- assert.doesNotMatch(ui.nodes['#navigation'].innerHTML,/#conversations/);
+ assert.match(ui.nodes['#navigation'].innerHTML,/#conversations/);
  received[0]={...received[0],proposal:{...received[0].proposal,status:'rejected'},canRespond:false,canConsult:true,negotiationId:'shared',negotiationStatus:'revision_requested'};
  await ui.go('#home');
  assert.match(ui.nodes['#navigation'].innerHTML,/#conversations/);
@@ -815,7 +817,7 @@ test('子どもへ最初に2つの発言を表示し、自動検索中は結果�
  });
  await ui.chat('progress');
  const html=ui.nodes['#content'].innerHTML;
- assert.equal((html.match(/class="chat-message assistant"/g)||[]).length,2);assert.match(html,/いま、なにか ほしいものは ある？/);
+ assert.equal((html.match(/class="chat-message assistant"/g)||[]).length,2);assert.match(html,/したいことや ほしいものは ある？/);
  let live='';ui.nodes['.chat-log']={insertAdjacentHTML(_position:string,html:string){live=html;ui.nodes['#search-progress']={remove(){delete ui.nodes['#search-progress'];}};}};
  const pending=ui.submit('message','',{message:'Nintendo Switchがほしい'});
  assert.match(live,/Yahoo!ショッピングで ほしいものを さがしているよ。ちょっと まってね。/);
@@ -889,4 +891,65 @@ test('お手伝いは下部タブから開き、ホームの重複ボタンは�
   await ui.go('#chores');assert.match(ui.nodes['#content'].innerHTML,/<section class="tasks">/);
   await ui.go('#home');assert.match(ui.nodes['#navigation'].innerHTML,/href="#chores"/);
  }
+});
+
+test('共有相談の固定案内と理由・返答ラベルは親子それぞれの語彙で表示する',async()=>{
+ for(const role of ['parent','child']){
+  const thread={mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,messages:[],products:[],currentProposal:{productId:'product',persuasionText:'色がかっこいい！'},proposalView:{product:{name:'サッカーボール'},negotiationResult:{reason:'ほんとに続けられるの？'}}};
+  const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/negotiations/shared'?thread:basic(path));
+  await ui.go('#negotiation/shared');const html=ui.nodes['#content'].innerHTML;
+  assert.match(html,/色がかっこいい！/);assert.match(html,/ほんとに続けられるの？/);
+  if(role==='parent'){
+   assert.match(html,/お子さんと一緒に、この商品の購入について相談できます/);assert.match(html,/ほしい理由：/);assert.match(html,/保護者の返答：/);
+   assert.doesNotMatch(html,/ここでは、おうちの人といっしょに|ほしい りゆう：|おうちの人の おへんじ：/);
+  }else{
+   assert.match(html,/ここでは、おうちの人といっしょに/);assert.match(html,/ほしい りゆう：/);assert.match(html,/おうちの人の おへんじ：/);
+  }
+ }
+});
+
+test('共有相談の内容は上部で開閉し、子どもには新規相談と結論操作を表示しない',async()=>{
+ const thread={mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,products:[],messages:[{sender:'assistant',content:'続け方を相談しよう'}],currentProposal:{productId:'product',version:2,persuasionText:'遊びたい'},proposalView:{product:{name:'ボール'},negotiationResult:{reason:'続けられる？'}}};
+ for(const role of ['parent','child']){
+  const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/negotiations/shared'?thread:basic(path));
+  await ui.go('#negotiation/shared');const html=ui.nodes['#content'].innerHTML;
+  assert.match(html,/^<details class="shared-context"><summary>/);assert.ok(html.indexOf('</details>')<html.indexOf('class="chat-log"'));
+  assert.doesNotMatch(html,/data-action="new-chat"|data-form="decide-negotiation"/);
+  if(role==='parent')assert.match(html,/class="chat-actions"><button[^>]*data-action="decide-negotiation"/);
+  else{
+   assert.doesNotMatch(html,/data-action="decide-negotiation"/);
+   await assert.rejects(ui.action('new-chat'),/共有相談の途中/);
+   await ui.go('#negotiation-decision/shared');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="decide-negotiation"/);
+   await assert.rejects(ui.submit('decide-negotiation','shared',{decision:'approved',reason:''}),/送信できません/);
+  }
+ }
+});
+test('結論画面は戻るだけでは送信せず、送信後は共有相談を終了して結果を表示する',async()=>{
+ for(const decision of ['approved','rejected']){
+  const writes:any[]=[];
+  const thread:any={mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,products:[],messages:[],currentProposal:{productId:'product',version:3,status:'rejected',persuasionText:'遊びたい'},proposalView:{product:{name:'ボール'},negotiationResult:{reason:'続けられる？'}}};
+  const ui=await frontend(async(path,method,body)=>{
+   if(path==='/negotiations/shared/decision'){writes.push(body);thread.canMessage=false;thread.phase='closed';thread.currentProposal.status=decision==='approved'?'agreed':'rejected';thread.proposalView.negotiationResult={decision,reason:body.reason};return {};}
+   if(path==='/negotiations/shared')return thread;
+   return basic(path);
+  });
+  await ui.go('#negotiation/shared');await ui.action('decide-negotiation','shared');
+  assert.equal(ui.location.hash,'#negotiation-decision/shared');assert.match(ui.nodes['#content'].innerHTML,/data-form="decide-negotiation"/);
+  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-form="message"/);
+  await ui.go('#negotiation/shared');assert.equal(writes.length,0);
+  await ui.action('decide-negotiation','shared');
+  await assert.rejects(ui.submit('decide-negotiation','shared',{decision:'',reason:''}),/結論を選んで/);
+  await assert.rejects(ui.submit('decide-negotiation','shared',{decision:'rejected',reason:''}),/見送る理由/);assert.equal(writes.length,0);
+  await ui.submit('decide-negotiation','shared',{decision,reason:decision==='approved'?'大切に使ってね':'今回は難しいです'});
+  assert.equal(writes.length,1);assert.equal(writes[0].version,3);assert.equal(writes[0].decision,decision);
+  assert.equal(ui.location.hash,'#negotiation/shared');assert.match(ui.nodes['#content'].innerHTML,/class="decision-result"/);
+  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/data-action="decide-negotiation"|data-form="message"|data-action="new-chat"/);
+  assert.match(ui.nodes['#content'].innerHTML,decision==='approved'?/購入を承認しました/:/今回は見送ります/);
+ }
+});
+test('結論の送信失敗時には入力画面を保ち、終了結果を表示しない',async()=>{
+ const thread={mode:'negotiation',negotiationId:'shared',phase:'negotiation',canMessage:true,products:[],messages:[],currentProposal:{version:4}};
+ const ui=await frontend(async path=>path==='/negotiations/shared'?thread:path==='/negotiations/shared/decision'?Promise.reject(Error('版が更新されています')):basic(path));
+ await ui.go('#negotiation-decision/shared');await assert.rejects(ui.submit('decide-negotiation','shared',{decision:'approved',reason:'OK'}),/版が更新/);
+ assert.equal(ui.location.hash,'#negotiation-decision/shared');assert.match(ui.nodes['#content'].innerHTML,/data-form="decide-negotiation"/);assert.doesNotMatch(ui.nodes['#content'].innerHTML,/class="decision-result"/);
 });

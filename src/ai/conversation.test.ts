@@ -213,21 +213,20 @@ for (const role of ['parent', 'child'] as const) {
     });
 }
 
-test('再交渉は同じ提案ID/versionをbasedOnへ返し、承認や状態は変更しない', async () => {
+test('共有相談は改訂下書きを作らず、承認や入力の状態も変更しない', async () => {
     const value = { ...input(), products: [product], currentProposal: proposal };
     const before = structuredClone(value);
     const result = await createReply(value, { generate: async () => draft({ action: 'NEGOTIATION' }) });
     assert.equal(result.action, 'NEGOTIATION');
-    if (result.action === 'NEGOTIATION') assert.deepEqual(result.proposalDraft?.basedOn, { proposalId: proposal.id, version: 2 });
+    if (result.action === 'NEGOTIATION') assert.equal(result.proposalDraft, null);
     assert.deepEqual(value, before);
 });
 
-test('再交渉で商品を変える場合もバックエンドの選択IDを使う', async () => {
+test('共有相談でモデルが別商品への再提案を返しても採用しない', async () => {
     const other = { ...product, id: 'product-2' };
     const result = await createReply({ ...input(), products: [product, other], selectedProductId: other.id, currentProposal: proposal }, { generate: async () => draft() });
     if (result.action !== 'NEGOTIATION') return assert.fail('expected negotiation');
-    assert.equal(result.proposalDraft?.productId, other.id);
-    assert.equal(result.proposalDraft?.basedOn?.version, 2);
+    assert.equal(result.proposalDraft, null);
 });
 
 for (const [label, changes] of [
@@ -413,7 +412,7 @@ test('検索結果の重複URLを商品候補へ重複して入れない', async
     assert.equal(output.products.length, 1); assert.equal(ids, 1);
 });
 
-test('公開入口で検索した出力をそのまま次の提案・修正の入力へ渡せる', async () => {
+test('公開入口で検索・初回提案から共有相談へ進み、再提案は作らない', async () => {
     const value = input();
     const found = await createReply(value, { generate: searchQueue([SEARCH(), grounded(), extraction()]), createId: () => product.id });
     if (found.action !== 'PRODUCT') return assert.fail('expected products');
@@ -424,8 +423,7 @@ test('公開入口で検索した出力をそのまま次の提案・修正の�
         persuasionText: offered.proposalDraft.persuasionText, purchaseConditions: offered.proposalDraft.purchaseConditions };
     const revised = await createReply({ ...chosen, role: 'parent', currentProposal: current }, { generate: async () => draft({ action: 'NEGOTIATION' }) });
     if (revised.action !== 'NEGOTIATION') return assert.fail('expected negotiation');
-    assert.equal(revised.proposalDraft?.target, 'child');
-    assert.deepEqual(revised.proposalDraft?.basedOn, { proposalId: current.id, version: 1 });
+    assert.equal(revised.proposalDraft, null);
 });
 
 for (const role of ['parent', 'child'] as const) {
@@ -488,7 +486,7 @@ for (const role of ['parent', 'child'] as const) {
 }
 
 for (const resultDecision of ['rejected', 'revision_requested'] as const) {
-    test(`BEの${resultDecision}理由を再提案に利用し、対象ID/versionと状態を保持する`, async () => {
+    test(`BEの${resultDecision}理由を共有相談に渡し、対象ID/versionと状態を保持する`, async () => {
         const reason = '宿題4日では負担が大きいので3日に変更してほしい。';
         const value: AIInput = { ...input(), products: [product], currentProposal: { ...proposal, status: 'rejected' },
             negotiationResult: { proposalId: proposal.id, version: proposal.version, decision: resultDecision, reason } };
@@ -501,8 +499,7 @@ for (const resultDecision of ['rejected', 'revision_requested'] as const) {
             return draft({ action: 'NEGOTIATION', purchaseConditions: ['今週は宿題を3日提出する'] });
         } });
         if (output.action !== 'NEGOTIATION') return assert.fail('expected negotiation');
-        assert.deepEqual(output.proposalDraft?.purchaseConditions, ['今週は宿題を3日提出する']);
-        assert.deepEqual(output.proposalDraft?.basedOn, { proposalId: proposal.id, version: proposal.version });
+        assert.equal(output.proposalDraft, null);
         assert.equal('decision' in output, false);
         assert.deepEqual(value, before);
     });
@@ -583,7 +580,7 @@ test('3件未満でも取得済み候補を提示し入力を変更しない', a
 });
 
 for (const role of ['parent', 'child'] as const) {
-    test(`${role}の交渉発言と親子・AIの共有履歴から修正案を作れる`, async () => {
+    test(`${role}の交渉発言と親子・AIの共有履歴で相談し、修正下書きは作らない`, async () => {
         const value: AIInput = { ...input(), role, message: '条件を4日から3日に変えたい。',
             negotiationHistory: [
                 { id: 'public-child', sender: 'child', content: '工作キットが欲しい。', createdAt: NOW },
@@ -603,8 +600,7 @@ for (const role of ['parent', 'child'] as const) {
             return draft({ action: 'NEGOTIATION', purchaseConditions: ['今週は宿題を3日提出する'] });
         } });
         if (output.action !== 'NEGOTIATION') return assert.fail('expected negotiation');
-        assert.deepEqual(output.proposalDraft?.purchaseConditions, ['今週は宿題を3日提出する']);
-        assert.equal(output.proposalDraft?.target, role === 'parent' ? 'child' : 'parent');
+        assert.equal(output.proposalDraft, null);
         assert.deepEqual(value, original);
     });
 }
@@ -695,11 +691,10 @@ test('親のNoボタンは発言なしでも理由を共有交渉へ渡し、個
         return draft({ action: 'NEGOTIATION', purchaseConditions: ['宿題を3日提出する'] });
     } });
     if (output.action !== 'NEGOTIATION') return assert.fail('expected negotiation');
-    assert.equal(output.proposalDraft?.target, 'child');
-    assert.deepEqual(output.proposalDraft?.basedOn, { proposalId: proposal.id, version: proposal.version });
+    assert.equal(output.proposalDraft, null);
 });
 
-test('発言なしの共有交渉でも、選択済み商品と対象提案から修正下書きを作れる', async () => {
+test('発言なしの共有交渉でも、対象提案について相談し下書きは作らない', async () => {
     const output = await createReply({ ...input(), message: null, products: [product],
         selectedProductId: product.id, currentProposal: proposal }, { generate: async () => draft({ action: 'NEGOTIATION' }) });
     assert.equal(output.action, 'NEGOTIATION');
@@ -808,4 +803,17 @@ test('自動検索へ切り替わった直後、検索処理より先に進捗�
  const order:string[]=[];
  const result=await createReply({...input(),mode:'consultation',sharedConditions:[]},{generate:async()=>decision({action:'SEARCH',searchQuery:'ブロック'}),onSearchStart:()=>{order.push('progress');},search:async()=>{order.push('search');return parseYahooResults({hits:[]});}});
  assert.deepEqual(order,['progress','search']);assert.equal(result.action,'HEARING');
+});
+
+test('共有相談では再提案・再検索・架空の送信案内を止める',async()=>{
+ for(const role of ['parent','child'] as const)for(const action of ['PROPOSAL','SEARCH','NEGOTIATION'] as const){
+  let searches=0;
+  const result=await createReply({...input(),role,products:[product],currentProposal:{...proposal,status:'rejected'},message:'続けるよ'}, {
+   generate:async request=>{assert.match(request.systemInstruction,/結論を出す/);return decision({action,searchQuery:action==='SEARCH'?'ボール':null,persuasionText:action==='PROPOSAL'?'新しい提案':null,reply:'提案の言葉を新しくしてみたよ。この内容でよければ送信ボタンを押してみてね。'});},
+   search:async()=>{searches++;throw Error('must not search');},
+  });
+  assert.equal(result.action,'NEGOTIATION');assert.equal(result.proposalDraft,null);assert.equal(searches,0);
+  assert.doesNotMatch(result.reply,/新しく|送信ボタン/);
+  if(role==='child')assert.doesNotMatch(result.reply,/結論を出す/);
+ }
 });

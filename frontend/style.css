@@ -1455,3 +1455,7 @@ form[data-form="reason"] textarea{min-height:160px}
 .service-credits{margin-top:32px;padding-top:16px;border-top:1px solid var(--border);overflow-wrap:anywhere}
 
 .proposal-home-return{align-self:center;width:auto;max-width:100%;display:inline-flex;align-items:center;justify-content:center;padding:12px 24px;text-align:center;text-decoration:none}
+
+.shared-context{flex-shrink:0;max-height:35vh;overflow-y:auto;margin:0 0 12px}
+.shared-context summary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shared-context p,.decision-result p{white-space:pre-wrap;overflow-wrap:anywhere}
