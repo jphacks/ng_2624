@@ -972,7 +972,7 @@ test('保護者への結論操作の案内は子ども側ではやさしい言�
   const thread={mode:'negotiation',negotiationId:'shared',canMessage:true,phase:'negotiation',products:[],messages:[{id:'reply',sender:'assistant',content:reply},{id:'parent',sender:'parent',content:'結論を出すのはあとにするね'}]};
   const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/negotiations/shared'?thread:basic(path));
   await ui.go('#negotiation/shared');const html=ui.nodes['#content'].innerHTML;
-  if(role==='child'){assert.match(html,/さいごの おへんじは、おうちのひとが きめるよ。/);assert.doesNotMatch(html,/進めていただけます|購入についての最終的な/);}
+  if(role==='child'){assert.match(html,/おうちのひとからの おへんじを、いっしょに まとうね。/);assert.doesNotMatch(html,/進めていただけます|購入についての最終的な/);}
   else assert.match(html,/進めていただけます/);
   assert.match(html,/半分こしてくれる気持ちが伝わってよかったですね/);assert.match(html,/結論を出すのはあとにするね/);
  }

@@ -231,7 +231,7 @@ function chatMessage(m){
  const assistant=m.sender==='assistant', own=m.own??m.sender==='user';
  const label=assistant?'ぽぽ':m.sender==='parent'?'保護者':m.sender==='child'?'子ども':'あなた';
  let content=assistant&&!parent()?String(m.content).replace(/\s*ねだんは変わることもあるよ。$/,''):m.content;
- if(assistant&&!parent()&&state.chat?.mode==='negotiation')content=String(content).replace(/[^。！？\n]*「結論を出す」[^。！？\n]*[。！？]?/gu,'さいごの おへんじは、おうちのひとが きめるよ。');
+ if(assistant&&!parent()&&state.chat?.mode==='negotiation')content=String(content).replace(/[^。！？\n]*「結論を出す」[^。！？\n]*[。！？]?/gu,'おうちのひとからの おへんじを、いっしょに まとうね。');
  const bubble=`<article class="chat-message ${assistant?'assistant':own?'person':'participant'}"><small>${label}</small><p>${esc(content)}</p></article>`;
  return assistant?`<div class="assistant-message"><span class="dove message-avatar" aria-hidden="true"></span>${bubble}</div>`:bubble;
 }
