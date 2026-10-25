@@ -44,7 +44,6 @@ export const FE_HTTP_DEFINITIONS: Record<FEOperation, HTTPDefinition> = {
   'sharing.revoke': route('DELETE', '/api/shared-conditions/{sharedConditionId}', 'SharedConditionRevocation'),
   'auth.session': route('GET', '/api/auth/session', 'SessionView'),
   'auth.google.start': route('GET', '/api/auth/google/start', 'BrowserRedirect', 303),
-  'auth.google.reauthenticate': route('POST', '/api/auth/google/reauthenticate', 'AuthorizationRedirect'),
   'auth.logout': route('POST', '/api/auth/logout', 'LogoutResult'),
   'devices.list': route('GET', '/api/devices', 'DeviceList'),
   'invitation.create': route('POST', '/api/children/{childId}/invitations', 'InvitationResult', 201),

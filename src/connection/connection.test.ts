@@ -32,7 +32,6 @@ const examples: { [K in FEOperation]: FERequestMap[K] } = {
   'sharing.revoke': { sharedConditionId: 'shared-1' },
   'auth.session': {},
   'auth.google.start': {},
-  'auth.google.reauthenticate': {},
   'auth.logout': {},
   'devices.list': {},
   'invitation.create': { childId: 'child-1' },
@@ -125,16 +124,15 @@ test('Googleのコールバック形式と重複や欠落を検証する', () =>
     assert.throws(() => parseGoogleAuthCallback(input), FEInputError);
   }
 });
-test('親だけの操作と再認証が必要な操作を区別する', () => {
+test('端末操作は保護者権限とCSRFで守る', () => {
   for (const operation of ['child.create', 'child.rename', 'child.settings.update', 'children.list',
-    'auth.google.reauthenticate', 'devices.list', 'pairing.requests.list', 'invitation.create', 'pairing.respond', 'device.revoke'] as const) {
+    'devices.list', 'pairing.requests.list', 'invitation.create', 'pairing.respond', 'device.revoke'] as const) {
     assert.equal(roleMayCall(operation, 'parent'), true);
     assert.equal(roleMayCall(operation, 'child'), false);
   }
   for (const operation of ['invitation.create', 'pairing.respond', 'device.revoke'] as const) {
-    assert.equal(FE_REQUEST_DEFINITIONS[operation].googleReauthentication, true);
+    assert.equal(FE_REQUEST_DEFINITIONS[operation].csrf, true);
   }
-  assert.equal(FE_REQUEST_DEFINITIONS['proposal.respond'].googleReauthentication, false);
   assert.equal(roleMayCall('pairing.request', 'parent'), false);
   assert.equal(roleMayCall('toString' as FEOperation, 'parent'), false);
   assert.equal(FE_REQUEST_DEFINITIONS['pairing.request'].authentication, 'pairing');

@@ -90,7 +90,6 @@ export interface FEResponseMap {
   'auth.session': SessionView;
   /** JSONを返さず、ブラウザ遷移で開始する。 */
   'auth.google.start': never;
-  'auth.google.reauthenticate': { authorizationUrl: string };
   'auth.logout': { loggedOut: true };
   'devices.list': { devices: DeviceView[] };
   'invitation.create': { invitationToken: string; childId: string; expiresAt: string };
@@ -110,7 +109,6 @@ export const API_ERRORS = {
   UNAUTHENTICATED: { status: 401, action: 'login', description: '親はGoogleで再ログイン、子供はQRで再接続する' },
   FORBIDDEN: { status: 403, action: 'stop', description: '操作を中止し、権限がないことを表示する' },
   CSRF_INVALID: { status: 403, action: 'refresh_session', description: 'セッション情報を取得し直す。自動再送しない' },
-  REAUTH_REQUIRED: { status: 403, action: 'reauthenticate', description: '保護者のGoogle再認証後、操作を再確認する' },
   NOT_FOUND: { status: 404, action: 'stop', description: '対象が見つからないことを表示する' },
   VERSION_CONFLICT: { status: 409, action: 'reload', description: '最新の提案を取得し直して確認する' },
   INVALID_STATE: { status: 409, action: 'reload', description: '対象の現在の状態を取得する' },

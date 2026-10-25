@@ -192,12 +192,12 @@ export function createApp(config: Config, dep: Dependencies) {
         return { row, user };
       }
       function sessionView(s: { row: Row; user: Row } | null) { return s ? { authenticated: true, user: { id: s.user.id, role: s.user.role, displayName: s.user.display_name, childId: s.user.role === 'child' ? s.user.id : null, onboardingCompleted: s.user.onboarding_completed }, csrfToken: s.row.csrf_token, idleExpiresAt: new Date(Math.min(Date.now() + (s.user.role === 'parent' ? DAY : 7 * DAY), Date.parse(s.row.expires_at))).toISOString(), absoluteExpiresAt: s.row.expires_at } : { authenticated: false, user: null, csrfToken: null, idleExpiresAt: null, absoluteExpiresAt: null }; }
-      async function startOAuth(reauthUserId?: string) {
+      async function startOAuth() {
         rate(`oauth:${remoteAddress}`, 20, 600000);
         const verifier = randomToken(), flow = randomToken();
-        setCookie('oauth', seal({ verifier, flow, reauthUserId, exp: Date.now() + 600000 }, config.sessionSecret), 600);
+        setCookie('oauth', seal({ verifier, flow, exp: Date.now() + 600000 }, config.sessionSecret), 600);
         const target = new URL('/auth/v1/authorize', config.supabaseUrl);
-        target.search = new URLSearchParams({ provider: 'google', redirect_to: `${config.origin}/api/auth/google/callback?flow=${flow}`, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 's256', prompt: 'select_account', ...(reauthUserId ? { max_age: '0' } : {}) }).toString();
+        target.search = new URLSearchParams({ provider: 'google', redirect_to: `${config.origin}/api/auth/google/callback?flow=${flow}`, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 's256', prompt: 'select_account' }).toString();
         return target.href;
       }
       if (path === '/api/auth/google/start' && method === 'GET') return redirect(await startOAuth());
@@ -208,11 +208,10 @@ export function createApp(config: Config, dep: Dependencies) {
           const auth = await db.auth('token?grant_type=pkce', 'POST', { auth_code: url.searchParams.get('code'), code_verifier: flow.verifier });
           const u = auth.user;
           assert(u?.id && u.identities?.some((i: Row) => i.provider === 'google'), 403, 'FORBIDDEN');
-          if (flow.reauthUserId) assert(flow.reauthUserId === u.id, 403, 'FORBIDDEN');
           await db.rpc('wb_register_parent', { p_user_id: u.id, p_display_name: String(u.user_metadata?.full_name || 'おうちの人').slice(0, 100) });
           // Access/refresh tokens never leave the server or become app cookies.
           const token = randomToken(), csrf = randomToken(), now = new Date().toISOString();
-          await db.insert('app_sessions', { token_hash: hash(token), user_id: u.id, csrf_token: csrf, expires_at: new Date(Date.now() + 7 * DAY).toISOString(), reauthenticated_at: now, device_label: '保護者の端末' });
+          await db.insert('app_sessions', { token_hash: hash(token), user_id: u.id, csrf_token: csrf, expires_at: new Date(Date.now() + 7 * DAY).toISOString(), device_label: '保護者の端末' });
           const old = jar[cookieName(config, 'session')]; if (old) await db.update('app_sessions', { token_hash: eq(hash(old)), user_id: eq(u.id) }, { revoked_at: now });
           setCookie('session', token, 7 * 86400); return redirect(`${config.origin}/#children`);
         } catch { return redirect(`${config.origin}/?authError=login_failed`); }
@@ -248,8 +247,6 @@ export function createApp(config: Config, dep: Dependencies) {
       if (method !== 'GET') protectMutation(request, config, session.row.csrf_token);
       rate(`api:${user.id}`, 300, 60000);
       const requireParent = () => assert(user.role === 'parent', 403, 'FORBIDDEN', '保護者の操作が必要です。');
-      const reauth = () => { requireParent(); assert(session.row.reauthenticated_at && Date.parse(session.row.reauthenticated_at) + 10 * 60000 > Date.now(), 403, 'REAUTH_REQUIRED', '安全のためGoogleで本人確認をしてください。'); };
-      if (path === '/api/auth/google/reauthenticate' && method === 'POST') { requireParent(); return result({ authorizationUrl: await startOAuth(user.id) }); }
       if (path === '/api/auth/logout' && method === 'POST') { requireParent(); await db.update('app_sessions', { token_hash: eq(session.row.token_hash) }, { revoked_at: new Date().toISOString() }); setCookie('session', '', 0); return result({ loggedOut: true }); }
       if (path === '/api/profile' && method === 'GET') return result(await profile(user));
       if (path === '/api/profile' && method === 'PATCH') {
@@ -300,7 +297,7 @@ export function createApp(config: Config, dep: Dependencies) {
       }
       const pairReply = /^\/api\/pairing\/requests\/([\w-]+)\/responses$/.exec(path);
       if (pairReply && method === 'POST') {
-        reauth(); const r = await one('app_pairing_requests', { id: eq(uuid(pairReply[1])) }); const inv = await one('app_invitations', { id: eq(r.invitation_id), parent_id: eq(user.id) }); await family(user, inv.child_id);
+        requireParent(); const r = await one('app_pairing_requests', { id: eq(uuid(pairReply[1])) }); const inv = await one('app_invitations', { id: eq(r.invitation_id), parent_id: eq(user.id) }); await family(user, inv.child_id);
         assert(['approved', 'rejected'].includes(body.decision)); let updated;
         if (body.decision === 'approved') updated = await db.rpc('wb_approve_pairing', { p_actor_id: user.id, p_request_id: r.id, p_confirmation_code: text(body.confirmationCode, 6) });
         else updated = (await db.update('app_pairing_requests', { id: eq(r.id), status: 'eq.pending' }, { status: 'rejected' }))[0] || r;

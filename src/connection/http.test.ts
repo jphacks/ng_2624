@@ -43,7 +43,6 @@ const examples: { [K in JSONOperation]: FEResponseMap[K] } = {
   'sharing.publish': { sharedCondition: { id: 's-1', sourceUserId: 'user-1', targetUserId: 'user-2', content: '確認した要約', approvedAt: time } },
   'sharing.revoke': { sharedConditionId: 's-1', revoked: true },
   'auth.session': { authenticated: false, user: null, csrfToken: null, idleExpiresAt: null, absoluteExpiresAt: null },
-  'auth.google.reauthenticate': { authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth' },
   'auth.logout': { loggedOut: true },
   'devices.list': { devices: [{ deviceSessionId: 'd-1', role: 'child', childId: 'child-1', deviceLabel: 'Safari', createdAt: time, lastActiveAt: time, isCurrent: false }] },
   'invitation.create': { invitationToken: 'example-invitation', childId: 'child-1', expiresAt: time },
@@ -171,6 +170,5 @@ test('商品とAI出力の各形を受け取り、認証URLの不正な形式を
     const response = { data: { ...conversation, products: [product], latestAIOutput: output }, requestId: 'r' };
     assert.deepEqual(parseAPISuccess('ConversationView', response), response);
   }
-  assert.throws(() => parseAPISuccess('AuthorizationRedirect', { data: { authorizationUrl: 'javascript:alert(1)' }, requestId: 'r' }));
   assert.throws(() => parseAPISuccess('SessionView', { data: { ...signedIn, user: { role: 'child', displayName: '子供', childId: null } }, requestId: 'r' }));
 });

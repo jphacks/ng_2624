@@ -54,7 +54,6 @@ export interface FERequestMap {
   'sharing.revoke': { sharedConditionId: string };
   'auth.session': Record<string, never>;
   'auth.google.start': Record<string, never>;
-  'auth.google.reauthenticate': Record<string, never>;
   'auth.logout': Record<string, never>;
   'devices.list': Record<string, never>;
   'invitation.create': { childId: string };

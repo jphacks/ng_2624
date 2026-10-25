@@ -115,7 +115,13 @@ test('API integration: real PostgreSQL functions behind private sessions, chores
   await pairCall('/pairing/session',{invitationToken:second.data.invitationToken});assert.notEqual(jar,firstCookie);
   const next=await pairCall('/pairing/requests',{invitationToken:second.data.invitationToken});assert.equal(next.status,200);
   assert.equal((await pairCall('/pairing/requests',{invitationToken:second.data.invitationToken})).data.pairingRequestId,next.data.pairingRequestId);
-  const approved=await call('/pairing/requests/'+next.data.pairingRequestId+'/responses','POST',{decision:'approved',confirmationCode:next.data.confirmationCode},'parent');assert.equal(approved.status,200);
+  await db.update('app_sessions',{token_hash:'eq.'+hash(tokenParent)},{reauthenticated_at:null});
+  const responsePath='/pairing/requests/'+next.data.pairingRequestId+'/responses';
+  const approval={decision:'approved',confirmationCode:next.data.confirmationCode};
+  assert.equal((await call(responsePath,'POST',approval)).status,403);
+  assert.equal((await call(responsePath,'POST',approval,'parent','wrong')).status,403);
+  assert.equal((await call('/auth/google/reauthenticate','POST',{},'parent')).status,404);
+  const approved=await call(responsePath,'POST',approval,'parent');assert.equal(approved.status,200);
   const ownJar=jar;jar+='; wb_local_session='+tokenParent;
   const blocked=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(blocked.status,409);assert.equal(blocked.error.code,'ALREADY_AUTHENTICATED');
   jar=ownJar;const complete=await pairCall('/pairing/requests/'+next.data.pairingRequestId+'/complete',{});assert.equal(complete.status,200);assert.equal(complete.data.user.role,'child');
