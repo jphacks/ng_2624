@@ -843,7 +843,15 @@ test('Yahoo!の商品を既存カードに表示し、購入リンクと選択�
  await parentUI.go('#child-home/child');
  assert.match(parentUI.nodes['#content'].innerHTML,/href="https:\/\/store.shopping.yahoo.co.jp\/shop\/item.html"/);
 });
-test('通常・デモ共通の入口に公式のプレーンテキスト形式のYahoo!クレジットを表示する',async()=>{
- const html=await readFile(new URL('../../frontend/index.html',import.meta.url),'utf8');
- assert.match(html,/<footer class="yahoo-credit">Webサービス by Yahoo! JAPAN （https:\/\/developer.yahoo.co.jp\/sitemap\/）<\/footer>/);
+test('Yahoo!クレジットは親・子どもの設定の最下部にだけ表示する',async()=>{
+ const entry=await readFile(new URL('../../frontend/index.html',import.meta.url),'utf8');
+ assert.doesNotMatch(entry,/Webサービス by Yahoo! JAPAN|yahoo-credit/);
+ for(const role of ['parent','child']){
+  const ui=await frontend(async path=>path==='/auth/session'?{...session,user:{...session.user,role}}:path==='/profile'?{displayName:'利用者',profile:{preferences:{interests:[]}}}:path==='/devices'?{devices:[]}:basic(path));
+  assert.doesNotMatch(ui.nodes['#content'].innerHTML,/Webサービス by Yahoo! JAPAN/);
+  await ui.go('#settings');const html=ui.nodes['#content'].innerHTML;
+  assert.match(html,/<footer class="service-credits" aria-label="クレジット"><h2>クレジット<\/h2><p>Webサービス by Yahoo! JAPAN （https:\/\/developer.yahoo.co.jp\/sitemap\/）<\/p><\/footer>$/);
+  assert.equal((html.match(/Webサービス by Yahoo! JAPAN/g)||[]).length,1);
+  await ui.go('#home');assert.doesNotMatch(ui.nodes['#content'].innerHTML,/Webサービス by Yahoo! JAPAN/);
+ }
 });
